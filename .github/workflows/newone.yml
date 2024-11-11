@@ -38,83 +38,133 @@ jobs:
           import os
           import requests
           import json
+          import sys
+          import re
           from datetime import datetime
 
           # Constants
           YOUTUBE_API_KEY = os.environ['YOUTUBE_API_KEY']
           playlist_id = os.environ['PLAYLIST_ID']
 
+          def sanitize_string(s):
+              """Sanitize string for GitHub Actions output"""
+              if not isinstance(s, str):
+                  s = str(s)
+              # Remove newlines and escape sequences
+              s = s.replace('\n', ' ').replace('\r', ' ')
+              # Replace multiple spaces with single space
+              s = re.sub(r'\s+', ' ', s)
+              # Escape special characters used by GitHub Actions
+              s = s.replace('%', '%25')
+              s = s.replace('\r', '%0D')
+              s = s.replace('\n', '%0A')
+              s = s.replace(':', '%3A')
+              s = s.replace(',', '%2C')
+              return s.strip()
+
           def fetch_playlist_details(playlist_id):
-              url = f'https://www.googleapis.com/youtube/v3/playlists?part=snippet,contentDetails,status&id={playlist_id}&key={YOUTUBE_API_KEY}'
-              response = requests.get(url)
-              response.raise_for_status()
-              return response.json()['items'][0]
-
-          def fetch_video_details(video_id):
-              url = f'https://www.googleapis.com/youtube/v3/videos?part=snippet,contentDetails,statistics&id={video_id}&key={YOUTUBE_API_KEY}'
-              response = requests.get(url)
-              response.raise_for_status()
-              return response.json()['items'][0]
-
-          def fetch_playlist_videos(playlist_id):
-              videos = []
-              url = f'https://www.googleapis.com/youtube/v3/playlistItems?part=snippet&maxResults=50&playlistId={playlist_id}&key={YOUTUBE_API_KEY}'
-              while url:
+              try:
+                  url = f'https://www.googleapis.com/youtube/v3/playlists?part=snippet,contentDetails,status&id={playlist_id}&key={YOUTUBE_API_KEY}'
                   response = requests.get(url)
                   response.raise_for_status()
                   data = response.json()
-                  for item in data.get('items', []):
-                      video_id = item['snippet']['resourceId']['videoId']
-                      video_details = fetch_video_details(video_id)
-                      videos.append(video_details)
-                  next_page_token = data.get('nextPageToken')
-                  if next_page_token:
-                      url = f'https://www.googleapis.com/youtube/v3/playlistItems?part=snippet&maxResults=50&pageToken={next_page_token}&playlistId={playlist_id}&key={YOUTUBE_API_KEY}'
-                  else:
-                      url = None
-              return videos
+                  if not data.get('items'):
+                      raise ValueError(f"No playlist found with ID: {playlist_id}")
+                  return data['items'][0]
+              except requests.exceptions.RequestException as e:
+                  raise Exception(f"Failed to fetch playlist details: {str(e)}")
 
-          # Fetch playlist details
-          playlist = fetch_playlist_details(playlist_id)
-          playlist_data = {
-              "playlistId": playlist['id'],
-              "title": playlist['snippet']['title'],
-              "description": playlist['snippet']['description'],
-              "thumbnailUrl": playlist['snippet']['thumbnails']['default']['url'],
-              "videoCount": playlist['contentDetails']['itemCount'],
-              "created_at": playlist['snippet']['publishedAt']
-          }
+          def fetch_video_details(video_id):
+              try:
+                  url = f'https://www.googleapis.com/youtube/v3/videos?part=snippet,contentDetails,statistics&id={video_id}&key={YOUTUBE_API_KEY}'
+                  response = requests.get(url)
+                  response.raise_for_status()
+                  data = response.json()
+                  if not data.get('items'):
+                      raise ValueError(f"No video found with ID: {video_id}")
+                  return data['items'][0]
+              except requests.exceptions.RequestException as e:
+                  raise Exception(f"Failed to fetch video details: {str(e)}")
 
-          # Write playlist data to GITHUB_OUTPUT
-          with open(os.environ['GITHUB_OUTPUT'], 'a') as fh:
-              for key, value in playlist_data.items():
-                  print(f"playlist_{key}={value}", file=fh)
-
-          # Fetch videos
-          videos = fetch_playlist_videos(playlist_id)
-          
-          # Write video data to GITHUB_OUTPUT
-          with open(os.environ['GITHUB_OUTPUT'], 'a') as fh:
-              for i, video in enumerate(videos):
-                  snippet = video['snippet']
-                  statistics = video.get('statistics', {})
-                  content_details = video.get('contentDetails', {})
-                  
-                  video_data = {
-                      "videoId": video['id'],
-                      "title": snippet['title'],
-                      "description": snippet['description'],
-                      "thumbnailUrl": snippet['thumbnails']['default']['url'],
-                      "duration": content_details.get('duration', ''),
-                      "viewCount": int(statistics.get('viewCount', 0)),
-                      "likeCount": int(statistics.get('likeCount', 0)),
-                      "commentCount": int(statistics.get('commentCount', 0))
-                  }
-                  
-                  for key, value in video_data.items():
-                      print(f"{key}_{i}={value}", file=fh)
+          def fetch_playlist_videos(playlist_id):
+              videos = []
+              next_page_token = None
               
-              print(f"video_count={len(videos)}", file=fh)
+              try:
+                  while True:
+                      url = f'https://www.googleapis.com/youtube/v3/playlistItems?part=snippet&maxResults=50&playlistId={playlist_id}&key={YOUTUBE_API_KEY}'
+                      if next_page_token:
+                          url += f'&pageToken={next_page_token}'
+                      
+                      response = requests.get(url)
+                      response.raise_for_status()
+                      data = response.json()
+                      
+                      for item in data.get('items', []):
+                          try:
+                              video_id = item['snippet']['resourceId']['videoId']
+                              video_details = fetch_video_details(video_id)
+                              videos.append(video_details)
+                          except Exception as e:
+                              print(f"Warning: Skipping video {video_id}: {str(e)}")
+                              continue
+                      
+                      next_page_token = data.get('nextPageToken')
+                      if not next_page_token:
+                          break
+                          
+                  return videos
+              except Exception as e:
+                  raise Exception(f"Failed to fetch playlist videos: {str(e)}")
+
+          try:
+              # Fetch playlist details
+              playlist = fetch_playlist_details(playlist_id)
+              playlist_data = {
+                  "playlistId": playlist['id'],
+                  "title": playlist['snippet']['title'],
+                  "description": playlist['snippet']['description'],
+                  "thumbnailUrl": playlist['snippet'].get('thumbnails', {}).get('default', {}).get('url', ''),
+                  "videoCount": playlist['contentDetails']['itemCount'],
+                  "created_at": playlist['snippet']['publishedAt']
+              }
+
+              # Write playlist data to GITHUB_OUTPUT
+              with open(os.environ['GITHUB_OUTPUT'], 'a') as fh:
+                  for key, value in playlist_data.items():
+                      sanitized_value = sanitize_string(value)
+                      print(f"playlist_{key}={sanitized_value}", file=fh)
+
+              # Fetch videos
+              videos = fetch_playlist_videos(playlist_id)
+              
+              # Write video data to GITHUB_OUTPUT
+              with open(os.environ['GITHUB_OUTPUT'], 'a') as fh:
+                  for i, video in enumerate(videos):
+                      snippet = video['snippet']
+                      statistics = video.get('statistics', {})
+                      content_details = video.get('contentDetails', {})
+                      
+                      video_data = {
+                          "videoId": video['id'],
+                          "title": snippet['title'],
+                          "description": snippet['description'],
+                          "thumbnailUrl": snippet.get('thumbnails', {}).get('default', {}).get('url', ''),
+                          "duration": content_details.get('duration', ''),
+                          "viewCount": int(statistics.get('viewCount', 0)),
+                          "likeCount": int(statistics.get('likeCount', 0)),
+                          "commentCount": int(statistics.get('commentCount', 0))
+                      }
+                      
+                      for key, value in video_data.items():
+                          sanitized_value = sanitize_string(value)
+                          print(f"{key}_{i}={sanitized_value}", file=fh)
+                  
+                  print(f"video_count={len(videos)}", file=fh)
+
+          except Exception as e:
+              print(f"Error: {str(e)}", file=sys.stderr)
+              sys.exit(1)
           EOF
 
       - name: Fetch and Modify YouTube Playlist Data
