@@ -1,9 +1,7 @@
 name: Update Port with Modified Name
 on:
   workflow_dispatch:
-    inputs:
-      playlistId:
-        type: string
+    
 jobs:
   update_port:
     runs-on: ubuntu-latest
