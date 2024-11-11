@@ -1,33 +1,94 @@
-name: Update Port with Modified Name
+name: Update Port with YouTube Playlist Data
 on:
   workflow_dispatch:
     inputs:
-        playlistid:
-          description: 'name of playlist'
-          required: true
-        port_context:
-          description: 'Port context payload'
-          required: true
-      
+      playlistid:
+        description: 'ID of the YouTube playlist'
+        required: true
+      port_context:
+        description: 'Port context payload'
+        required: true
+
 jobs:
   update_port:
     runs-on: ubuntu-latest
     env:
       PORT_CLIENT_ID: ${{ secrets.PORT_CLIENT_ID }}
       PORT_CLIENT_SECRET: ${{ secrets.PORT_CLIENT_SECRET }}
-      GITHUB_TOKEN: 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
-      PORT_RUN_ID: ${{ fromJson(inputs.port_context).runId }}
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Create a log message (apply)
+      - name: Set up Python
+        uses: actions/setup-python@v2
+        with:
+          python-version: '3.x'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install requests
+
+      - name: Fetch and Modify YouTube Playlist Data
+        id: fetch_modify_data
+        env:
+          YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
+          PLAYLIST_ID: ${{ github.event.inputs.playlistid }}
+        run: |
+          import os
+          import requests
+          import json
+
+          # Constants
+          YOUTUBE_API_KEY = os.environ['YOUTUBE_API_KEY']
+          playlist_id = os.environ['PLAYLIST_ID']
+
+          # Fetch videos from YouTube playlist
+          def fetch_playlist_videos(playlist_id):
+              videos = []
+              url = f'https://www.googleapis.com/youtube/v3/playlistItems?part=snippet&maxResults=50&playlistId={playlist_id}&key={YOUTUBE_API_KEY}'
+              while url:
+                  response = requests.get(url)
+                  response.raise_for_status()
+                  data = response.json()
+                  videos.extend(data.get('items', []))
+                  next_page_token = data.get('nextPageToken')
+                  if next_page_token:
+                      url = f'https://www.googleapis.com/youtube/v3/playlistItems?part=snippet&maxResults=50&pageToken={next_page_token}&playlistId={playlist_id}&key={YOUTUBE_API_KEY}'
+                  else:
+                      url = None
+              return videos
+
+          # Fetch data
+          videos = fetch_playlist_videos(playlist_id)
+          for i, video in enumerate(videos):
+              video_id = video['snippet']['resourceId']['videoId']
+              title = video['snippet']['title']
+              description = video['snippet']['description']
+              published_at = video['snippet']['publishedAt']
+              
+              print(f"::set-output name=video_id_{i}::{video_id}")
+              print(f"::set-output name=title_{i}::{title}")
+              print(f"::set-output name=description_{i}::{description}")
+              print(f"::set-output name=published_at_{i}::{published_at}")
+          
+          print(f"::set-output name=video_count::{len(videos)}")
+
+      - name: Upsert Video Data into Port
+        if: steps.fetch_modify_data.outputs.video_count > 0
         uses: port-labs/port-github-action@v1
         with:
           clientId: ${{ secrets.PORT_CLIENT_ID }}
           clientSecret: ${{ secrets.PORT_CLIENT_SECRET }}
           baseUrl: https://api.getport.io
-          operation: PATCH_RUN
-          runId: ${{ env.PORT_RUN_ID }}
-          logMessage: "Initiating creation of youtube playlist: ${{ inputs.playlistId }}."
+          operation: UPSERT
+          identifier: ${{ steps.fetch_modify_data.outputs.video_id_0 }} # Example for the first video
+          blueprint: video
+          properties: |-
+            {
+              "video_id": "${{ steps.fetch_modify_data.outputs.video_id_0 }}",
+              "title": "${{ steps.fetch_modify_data.outputs.title_0 }}",
+              "description": "${{ steps.fetch_modify_data.outputs.description_0 }}",
+              "published_at": "${{ steps.fetch_modify_data.outputs.published_at_0 }}"
+            }
