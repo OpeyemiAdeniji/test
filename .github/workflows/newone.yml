@@ -2,41 +2,26 @@ name: Update Port with Modified Name
 on:
   workflow_dispatch:
     inputs:
-      firstname:
+      playlistId:
         type: string
 jobs:
   update_port:
     runs-on: ubuntu-latest
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v2
-      - name: Set up Python
-        uses: actions/setup-python@v2
-        with:
-          python-version: '3.x'
-      - name: Modify Inputs with Python
-        id: modify_inputs
-        run: |
-          name = "${{ github.event.inputs.firstname }}-updated"
-          echo "::set-output name=modified_firstname::${name}"
-      - name: Update Port using GitHub API
-        env:
-          CLIENT_ID: tbmXaNhpgpYiZpYe5HqRYR9ZWSe0tJGV
-          CLIENT_SECRET: lZrhNU5u7W8plwejnnDshOuuIOlU6IN4rLBBzDIfnzarsdljw7X88lKgdlT5BsG9
-        run: |
-          import requests
-          import json
+    env:
+      PORT_CLIENT_ID: ${{ secrets.PORT_CLIENT_ID }}
+      PORT_CLIENT_SECRET: ${{ secrets.PORT_CLIENT_SECRET }}
+      PORT_RUN_ID: ${{ fromJson(inputs.port_context).runId }}
 
-          url = "https://api.getport.io/v1/port/newoneautomation"
-          payload = {
-              "name": "${{ steps.modify_inputs.outputs.modified_firstname }}",
-              "blueprint": "newone",
-              "team": ["myTeam"],
-              "icon": "GithubActions"
-          }
-          headers = {
-              'Content-Type': 'application/json',
-              'Authorization': f'Bearer {CLIENT_ID}:{CLIENT_SECRET}'
-          }
-          response = requests.request("PUT", url, headers=headers, data=json.dumps(payload))
-          print(response.text.encode('utf8'))
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Create a log message (apply)
+        uses: port-labs/port-github-action@v1
+        with:
+          clientId: ${{ secrets.PORT_CLIENT_ID }}
+          clientSecret: ${{ secrets.PORT_CLIENT_SECRET }}
+          baseUrl: https://api.getport.io
+          operation: PATCH_RUN
+          runId: ${{ env.PORT_RUN_ID }}
+          logMessage: "Initiating creation of youtube playlist: ${{ inputs.playlistId }}."
