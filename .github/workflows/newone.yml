@@ -104,7 +104,7 @@ jobs:
           baseUrl: https://api.getport.io
           operation: UPSERT
           identifier: ${{ steps.fetch_modify_data.outputs.video_id_0 }}
-          blueprint: YouTube Video
+          blueprint: video
           properties: |-
             {
               "video_id": "${{ steps.fetch_modify_data.outputs.video_id_0 }}",
