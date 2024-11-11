@@ -1,4 +1,4 @@
-name: Update Port with Modified Name and Age
+name: Update Port with Modified Name
 on:
   workflow_dispatch:
     inputs:
@@ -19,18 +19,24 @@ jobs:
         run: |
           name = "${{ github.event.inputs.firstname }}-updated"
           echo "::set-output name=modified_firstname::${name}"
-      - name: Update Port
-        uses: port-labs/port-github-action@v1
-        with:
-          clientId: tbmXaNhpgpYiZpYe5HqRYR9ZWSe0tJGV
-          clientSecret: lZrhNU5u7W8plwejnnDshOuuIOlU6IN4rLBBzDIfnzarsdljw7X88lKgdlT5BsG9
-          baseUrl: https://api.getport.io
-          operation: UPSERT
-          identifier: newoneautomation
-          icon: GithubActions
-          blueprint: newone
-          team: "['myTeam']"
-          properties: |-
-            {
-              "name": "${{ steps.modify_inputs.outputs.modified_firstname }}"
-            }
+      - name: Update Port using GitHub API
+        env:
+          CLIENT_ID: tbmXaNhpgpYiZpYe5HqRYR9ZWSe0tJGV
+          CLIENT_SECRET: lZrhNU5u7W8plwejnnDshOuuIOlU6IN4rLBBzDIfnzarsdljw7X88lKgdlT5BsG9
+        run: |
+          import requests
+          import json
+
+          url = "https://api.getport.io/v1/port/newoneautomation"
+          payload = {
+              "name": "${{ steps.modify_inputs.outputs.modified_firstname }}",
+              "blueprint": "newone",
+              "team": ["myTeam"],
+              "icon": "GithubActions"
+          }
+          headers = {
+              'Content-Type': 'application/json',
+              'Authorization': f'Bearer {CLIENT_ID}:{CLIENT_SECRET}'
+          }
+          response = requests.request("PUT", url, headers=headers, data=json.dumps(payload))
+          print(response.text.encode('utf8'))
