@@ -32,12 +32,9 @@ jobs:
           python -m pip install --upgrade pip
           pip install requests
 
-      - name: Fetch and Modify YouTube Playlist Data
-        id: fetch_modify_data
-        env:
-          YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
-          PLAYLIST_ID: ${{ github.event.inputs.playlistid }}
+      - name: Create Python script
         run: |
+          cat << 'EOF' > fetch_youtube.py
           import os
           import requests
           import json
@@ -64,18 +61,29 @@ jobs:
 
           # Fetch data
           videos = fetch_playlist_videos(playlist_id)
-          for i, video in enumerate(videos):
-              video_id = video['snippet']['resourceId']['videoId']
-              title = video['snippet']['title']
-              description = video['snippet']['description']
-              published_at = video['snippet']['publishedAt']
-              
-              print(f"::set-output name=video_id_{i}::{video_id}")
-              print(f"::set-output name=title_{i}::{title}")
-              print(f"::set-output name=description_{i}::{description}")
-              print(f"::set-output name=published_at_{i}::{published_at}")
           
-          print(f"::set-output name=video_count::{len(videos)}")
+          # GitHub Actions output syntax has changed, using the new syntax
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as fh:
+              for i, video in enumerate(videos):
+                  video_id = video['snippet']['resourceId']['videoId']
+                  title = video['snippet']['title']
+                  description = video['snippet']['description']
+                  published_at = video['snippet']['publishedAt']
+                  
+                  print(f"video_id_{i}={video_id}", file=fh)
+                  print(f"title_{i}={title}", file=fh)
+                  print(f"description_{i}={description}", file=fh)
+                  print(f"published_at_{i}={published_at}", file=fh)
+              
+              print(f"video_count={len(videos)}", file=fh)
+          EOF
+
+      - name: Fetch and Modify YouTube Playlist Data
+        id: fetch_modify_data
+        env:
+          YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
+          PLAYLIST_ID: ${{ inputs.playlistid }}
+        run: python fetch_youtube.py
 
       - name: Create a log message (apply)
         uses: port-labs/port-github-action@v1
@@ -95,7 +103,7 @@ jobs:
           clientSecret: ${{ secrets.PORT_CLIENT_SECRET }}
           baseUrl: https://api.getport.io
           operation: UPSERT
-          identifier: ${{ steps.fetch_modify_data.outputs.video_id_0 }} # Example for the first video
+          identifier: ${{ steps.fetch_modify_data.outputs.video_id_0 }}
           blueprint: YouTube Video
           properties: |-
             {
