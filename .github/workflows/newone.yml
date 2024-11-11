@@ -5,8 +5,6 @@ on:
     inputs:
       firstname:
         type: string
-      age:
-        type: number
 
 jobs:
   update_port:
@@ -25,9 +23,7 @@ jobs:
         id: modify_inputs
         run: |
           name = "${{ github.event.inputs.firstname }}-updated"
-          age = ${{ github.event.inputs.age }} + 1000
           echo "::set-output firstname=modified_firstname::${firstname}"
-          echo "::set-output age=modified_age::${age}"
 
       - name: Update Port
         uses: port-labs/port-github-action@v1
@@ -42,6 +38,5 @@ jobs:
           team: "['myTeam']"
           properties: |-
             {
-              "name": "${{ steps.modify_inputs.outputs.modified_firstname }}",
-              "age": ${{ steps.modify_inputs.outputs.modified_age }}
+              "name": "${{ steps.modify_inputs.outputs.modified_firstname }}"
             }
