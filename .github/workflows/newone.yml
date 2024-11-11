@@ -38,5 +38,5 @@ jobs:
           team: "['myTeam']"
           properties: |-
             {
-              "name": "${{ steps.modify_inputs.outputs.modified_firstname }}"
+              "name": agric
             }
