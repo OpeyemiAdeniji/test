@@ -43,7 +43,12 @@ jobs:
           YOUTUBE_API_KEY = os.environ['YOUTUBE_API_KEY']
           playlist_id = os.environ['PLAYLIST_ID']
 
-          # Fetch videos from YouTube playlist
+          def fetch_video_details(video_id):
+              url = f'https://www.googleapis.com/youtube/v3/videos?part=snippet,contentDetails,statistics&id={video_id}&key={YOUTUBE_API_KEY}'
+              response = requests.get(url)
+              response.raise_for_status()
+              return response.json()['items'][0]
+
           def fetch_playlist_videos(playlist_id):
               videos = []
               url = f'https://www.googleapis.com/youtube/v3/playlistItems?part=snippet&maxResults=50&playlistId={playlist_id}&key={YOUTUBE_API_KEY}'
@@ -51,7 +56,11 @@ jobs:
                   response = requests.get(url)
                   response.raise_for_status()
                   data = response.json()
-                  videos.extend(data.get('items', []))
+                  for item in data.get('items', []):
+                      video_id = item['snippet']['resourceId']['videoId']
+                      # Fetch additional video details
+                      video_details = fetch_video_details(video_id)
+                      videos.append(video_details)
                   next_page_token = data.get('nextPageToken')
                   if next_page_token:
                       url = f'https://www.googleapis.com/youtube/v3/playlistItems?part=snippet&maxResults=50&pageToken={next_page_token}&playlistId={playlist_id}&key={YOUTUBE_API_KEY}'
@@ -62,18 +71,27 @@ jobs:
           # Fetch data
           videos = fetch_playlist_videos(playlist_id)
           
-          # GitHub Actions output syntax has changed, using the new syntax
+          # GitHub Actions output syntax
           with open(os.environ['GITHUB_OUTPUT'], 'a') as fh:
               for i, video in enumerate(videos):
-                  video_id = video['snippet']['resourceId']['videoId']
-                  title = video['snippet']['title']
-                  description = video['snippet']['description']
-                  published_at = video['snippet']['publishedAt']
+                  snippet = video['snippet']
+                  statistics = video.get('statistics', {})
+                  content_details = video.get('contentDetails', {})
                   
-                  print(f"video_id_{i}={video_id}", file=fh)
-                  print(f"title_{i}={title}", file=fh)
-                  print(f"description_{i}={description}", file=fh)
-                  print(f"published_at_{i}={published_at}", file=fh)
+                  video_data = {
+                      "videoId": video['id'],
+                      "title": snippet['title'],
+                      "description": snippet['description'],
+                      "thumbnailUrl": snippet['thumbnails']['default']['url'],
+                      "duration": content_details.get('duration', ''),
+                      "viewCount": int(statistics.get('viewCount', 0)),
+                      "likeCount": int(statistics.get('likeCount', 0)),
+                      "commentCount": int(statistics.get('commentCount', 0))
+                  }
+                  
+                  # Write each property to GITHUB_OUTPUT
+                  for key, value in video_data.items():
+                      print(f"{key}_{i}={value}", file=fh)
               
               print(f"video_count={len(videos)}", file=fh)
           EOF
@@ -103,12 +121,20 @@ jobs:
           clientSecret: ${{ secrets.PORT_CLIENT_SECRET }}
           baseUrl: https://api.getport.io
           operation: UPSERT
-          identifier: ${{ steps.fetch_modify_data.outputs.video_id_0 }}
+          identifier: ${{ steps.fetch_modify_data.outputs.videoId_0 }}
           blueprint: video
           properties: |-
             {
-              "video_id": "${{ steps.fetch_modify_data.outputs.video_id_0 }}",
+              "videoId": "${{ steps.fetch_modify_data.outputs.videoId_0 }}",
               "title": "${{ steps.fetch_modify_data.outputs.title_0 }}",
               "description": "${{ steps.fetch_modify_data.outputs.description_0 }}",
-              "published_at": "${{ steps.fetch_modify_data.outputs.published_at_0 }}"
+              "thumbnailUrl": "${{ steps.fetch_modify_data.outputs.thumbnailUrl_0 }}",
+              "duration": "${{ steps.fetch_modify_data.outputs.duration_0 }}",
+              "viewCount": ${{ steps.fetch_modify_data.outputs.viewCount_0 }},
+              "likeCount": ${{ steps.fetch_modify_data.outputs.likeCount_0 }},
+              "commentCount": ${{ steps.fetch_modify_data.outputs.commentCount_0 }}
+            }
+          relations: |-
+            {
+              "belongs_to_playlist": "${{ inputs.playlistid }}"
             }
