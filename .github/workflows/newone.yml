@@ -43,8 +43,8 @@ import requests
 import json
 
 # Constants
-YOUTUBE_API_KEY = os.environ['YOUTUBE_API_KEY']
-playlist_id = os.environ['PLAYLIST_ID']
+YOUTUBE_API_KEY = os.getenv('YOUTUBE_API_KEY')
+playlist_id = os.getenv('PLAYLIST_ID')
 
 # Fetch videos from YouTube playlist
 def fetch_playlist_videos(playlist_id):
