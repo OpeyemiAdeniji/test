@@ -1,0 +1,55 @@
+name: Update Port with Modified Name and Age
+
+on:
+  workflow_dispatch:
+    inputs:
+      name:
+        type: string
+        required: true
+        description: "The name to be updated in Port"
+      age:
+        type: number
+        required: true
+        description: "The age to be updated in Port"
+
+jobs:
+  update_port:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v2
+
+      - name: Set up Python
+        uses: actions/setup-python@v2
+        with:
+          python-version: '3.x'
+
+      - name: Modify Inputs with Python
+        id: modify_inputs
+        env:
+          INPUT_NAME: ${{ github.event.inputs.name }}
+          INPUT_AGE: ${{ github.event.inputs.age }}
+        run: |
+          import os
+          name = os.environ["INPUT_NAME"] + "-updated"
+          age = int(os.environ["INPUT_AGE"]) + 1000
+          print(f"::set-output name=modified_name::{name}")
+          print(f"::set-output name=modified_age::{age}")
+
+      - name: Update Port
+        uses: port-labs/port-github-action@v1
+        with:
+          clientId: tbmXaNhpgpYiZpYe5HqRYR9ZWSe0tJGV
+          clientSecret: lZrhNU5u7W8plwejnnDshOuuIOlU6IN4rLBBzDIfnzarsdljw7X88lKgdlT5BsG9
+          baseUrl: https://api.getport.io
+          operation: UPSERT
+          identifier: myEntity
+          icon: myIcon
+          blueprint: myBlueprint
+          team: "['myTeam']"
+          properties: |-
+            {
+              "name": "${{ steps.modify_inputs.outputs.modified_name }}",
+              "age": ${{ steps.modify_inputs.outputs.modified_age }}
+            }
