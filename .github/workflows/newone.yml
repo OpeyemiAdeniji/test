@@ -1,30 +1,24 @@
 name: Update Port with Modified Name and Age
-
 on:
   workflow_dispatch:
     inputs:
       firstname:
         type: string
-
 jobs:
   update_port:
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout repository
         uses: actions/checkout@v2
-
       - name: Set up Python
         uses: actions/setup-python@v2
         with:
           python-version: '3.x'
-
       - name: Modify Inputs with Python
         id: modify_inputs
         run: |
           name = "${{ github.event.inputs.firstname }}-updated"
-          echo "::set-output firstname=modified_firstname::${firstname}"
-
+          echo "::set-output name=modified_firstname::${name}"
       - name: Update Port
         uses: port-labs/port-github-action@v1
         with:
@@ -38,5 +32,5 @@ jobs:
           team: "['myTeam']"
           properties: |-
             {
-              "name": agric
+              "name": "${{ steps.modify_inputs.outputs.modified_firstname }}"
             }
