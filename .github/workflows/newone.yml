@@ -2,7 +2,7 @@ name: Update Port with Modified Name
 on:
   workflow_dispatch:
     inputs:
-        playlistIdoo:
+        playlistId:
           type: string
       
 jobs:
