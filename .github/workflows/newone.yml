@@ -186,7 +186,7 @@ jobs:
           clientId: ${{ secrets.PORT_CLIENT_ID }}
           clientSecret: ${{ secrets.PORT_CLIENT_SECRET }}
           baseUrl: https://api.getport.io
-          operation: UPSERT_MANY
+          operation: UPSERT
           blueprint: video
           items: ${{ steps.fetch_modify_data.outputs.video_items }}
 
