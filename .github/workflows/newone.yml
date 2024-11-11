@@ -50,11 +50,8 @@ jobs:
               """Sanitize string for GitHub Actions output"""
               if not isinstance(s, str):
                   s = str(s)
-              # Remove newlines and escape sequences
               s = s.replace('\n', ' ').replace('\r', ' ')
-              # Replace multiple spaces with single space
               s = re.sub(r'\s+', ' ', s)
-              # Escape special characters used by GitHub Actions
               s = s.replace('%', '%25')
               s = s.replace('\r', '%0D')
               s = s.replace('\n', '%0A')
@@ -89,7 +86,7 @@ jobs:
           def fetch_playlist_videos(playlist_id):
               videos = []
               next_page_token = None
-              video_ids = []
+              video_data_list = []
               
               try:
                   while True:
@@ -106,7 +103,26 @@ jobs:
                               video_id = item['snippet']['resourceId']['videoId']
                               video_details = fetch_video_details(video_id)
                               videos.append(video_details)
-                              video_ids.append(video_id)
+                              
+                              # Create video data object
+                              snippet = video_details['snippet']
+                              statistics = video_details.get('statistics', {})
+                              content_details = video_details.get('contentDetails', {})
+                              
+                              video_data = {
+                                  "identifier": video_id,
+                                  "properties": {
+                                      "videoId": video_id,
+                                      "title": snippet['title'],
+                                      "description": snippet['description'],
+                                      "thumbnailUrl": snippet.get('thumbnails', {}).get('default', {}).get('url', ''),
+                                      "duration": content_details.get('duration', ''),
+                                      "viewCount": int(statistics.get('viewCount', 0)),
+                                      "likeCount": int(statistics.get('likeCount', 0)),
+                                      "commentCount": int(statistics.get('commentCount', 0))
+                                  }
+                              }
+                              video_data_list.append(video_data)
                           except Exception as e:
                               print(f"Warning: Skipping video {video_id}: {str(e)}")
                               continue
@@ -115,7 +131,7 @@ jobs:
                       if not next_page_token:
                           break
                           
-                  return videos, video_ids
+                  return videos, video_data_list
               except Exception as e:
                   raise Exception(f"Failed to fetch playlist videos: {str(e)}")
 
@@ -138,33 +154,16 @@ jobs:
                       print(f"playlist_{key}={sanitized_value}", file=fh)
 
               # Fetch videos
-              videos, video_ids = fetch_playlist_videos(playlist_id)
+              videos, video_data_list = fetch_playlist_videos(playlist_id)
               
               # Write video data to GITHUB_OUTPUT
               with open(os.environ['GITHUB_OUTPUT'], 'a') as fh:
-                  # Write video IDs as a JSON array for relations
-                  video_ids_json = json.dumps(video_ids)
-                  print(f"video_ids={video_ids_json}", file=fh)
+                  # Write video data list as JSON for UPSERT_MANY
+                  print(f"video_items={json.dumps(video_data_list)}", file=fh)
                   
-                  for i, video in enumerate(videos):
-                      snippet = video['snippet']
-                      statistics = video.get('statistics', {})
-                      content_details = video.get('contentDetails', {})
-                      
-                      video_data = {
-                          "videoId": video['id'],
-                          "title": snippet['title'],
-                          "description": snippet['description'],
-                          "thumbnailUrl": snippet.get('thumbnails', {}).get('default', {}).get('url', ''),
-                          "duration": content_details.get('duration', ''),
-                          "viewCount": int(statistics.get('viewCount', 0)),
-                          "likeCount": int(statistics.get('likeCount', 0)),
-                          "commentCount": int(statistics.get('commentCount', 0))
-                      }
-                      
-                      for key, value in video_data.items():
-                          sanitized_value = sanitize_string(value)
-                          print(f"{key}_{i}={sanitized_value}", file=fh)
+                  # Write video IDs for relations
+                  video_ids = [v["identifier"] for v in video_data_list]
+                  print(f"video_ids={json.dumps(video_ids)}", file=fh)
                   
                   print(f"video_count={len(videos)}", file=fh)
 
@@ -189,20 +188,7 @@ jobs:
           baseUrl: https://api.getport.io
           operation: UPSERT_MANY
           blueprint: video
-          items: |
-            ${{ fromJSON(toJSON(range(0, steps.fetch_modify_data.outputs.video_count))) | map(index => {
-              "identifier": format("{0}", fromJson(steps.fetch_modify_data.outputs[format("videoId_{0}", index)])),
-              "properties": {
-                "videoId": fromJson(steps.fetch_modify_data.outputs[format("videoId_{0}", index)]),
-                "title": fromJson(steps.fetch_modify_data.outputs[format("title_{0}", index)]),
-                "description": fromJson(steps.fetch_modify_data.outputs[format("description_{0}", index)]),
-                "thumbnailUrl": fromJson(steps.fetch_modify_data.outputs[format("thumbnailUrl_{0}", index)]),
-                "duration": fromJson(steps.fetch_modify_data.outputs[format("duration_{0}", index)]),
-                "viewCount": fromJson(steps.fetch_modify_data.outputs[format("viewCount_{0}", index)]),
-                "likeCount": fromJson(steps.fetch_modify_data.outputs[format("likeCount_{0}", index)]),
-                "commentCount": fromJson(steps.fetch_modify_data.outputs[format("commentCount_{0}", index)])
-              }
-            }) | toJSON }}
+          items: ${{ steps.fetch_modify_data.outputs.video_items }}
 
       - name: Create Playlist in Port
         uses: port-labs/port-github-action@v1
@@ -224,5 +210,5 @@ jobs:
             }
           relations: |-
             {
-              "has_videos": ${{ fromJSON(steps.fetch_modify_data.outputs.video_ids) | map(videoId => videoId) | toJSON }}
+              "has_videos": ${{ steps.fetch_modify_data.outputs.video_ids }}
             }
