@@ -28,8 +28,8 @@ jobs:
       - name: Modify Inputs with Python
         id: modify_inputs
         run: |
-          name = "${{ github.event.inputs.name }}-updated"
-          age = ${{ github.event.inputs.age }} + 1000
+          name = "${{ inputs.name }}-updated"
+          age = ${{ inputs.age }} + 1000
           echo "::set-output name=modified_name::${name}"
           echo "::set-output name=modified_age::${age}"
 
@@ -40,8 +40,8 @@ jobs:
           clientSecret: lZrhNU5u7W8plwejnnDshOuuIOlU6IN4rLBBzDIfnzarsdljw7X88lKgdlT5BsG9
           baseUrl: https://api.getport.io
           operation: UPSERT
-          identifier: newone
-          icon: myIcon
+          identifier: newoneautomation
+          icon: GithubActions
           blueprint: newone
           team: "['myTeam']"
           properties: |-
