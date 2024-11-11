@@ -89,6 +89,7 @@ jobs:
           def fetch_playlist_videos(playlist_id):
               videos = []
               next_page_token = None
+              video_ids = []
               
               try:
                   while True:
@@ -105,6 +106,7 @@ jobs:
                               video_id = item['snippet']['resourceId']['videoId']
                               video_details = fetch_video_details(video_id)
                               videos.append(video_details)
+                              video_ids.append(video_id)
                           except Exception as e:
                               print(f"Warning: Skipping video {video_id}: {str(e)}")
                               continue
@@ -113,7 +115,7 @@ jobs:
                       if not next_page_token:
                           break
                           
-                  return videos
+                  return videos, video_ids
               except Exception as e:
                   raise Exception(f"Failed to fetch playlist videos: {str(e)}")
 
@@ -136,10 +138,14 @@ jobs:
                       print(f"playlist_{key}={sanitized_value}", file=fh)
 
               # Fetch videos
-              videos = fetch_playlist_videos(playlist_id)
+              videos, video_ids = fetch_playlist_videos(playlist_id)
               
               # Write video data to GITHUB_OUTPUT
               with open(os.environ['GITHUB_OUTPUT'], 'a') as fh:
+                  # Write video IDs as a JSON array for relations
+                  video_ids_json = json.dumps(video_ids)
+                  print(f"video_ids={video_ids_json}", file=fh)
+                  
                   for i, video in enumerate(videos):
                       snippet = video['snippet']
                       statistics = video.get('statistics', {})
@@ -174,6 +180,30 @@ jobs:
           PLAYLIST_ID: ${{ inputs.playlistid }}
         run: python fetch_youtube.py
 
+      - name: Create Video Entities in Port
+        if: steps.fetch_modify_data.outputs.video_count > 0
+        uses: port-labs/port-github-action@v1
+        with:
+          clientId: ${{ secrets.PORT_CLIENT_ID }}
+          clientSecret: ${{ secrets.PORT_CLIENT_SECRET }}
+          baseUrl: https://api.getport.io
+          operation: UPSERT_MANY
+          blueprint: video
+          items: |
+            ${{ fromJSON(toJSON(range(0, steps.fetch_modify_data.outputs.video_count))) | map(index => {
+              "identifier": format("{0}", fromJson(steps.fetch_modify_data.outputs[format("videoId_{0}", index)])),
+              "properties": {
+                "videoId": fromJson(steps.fetch_modify_data.outputs[format("videoId_{0}", index)]),
+                "title": fromJson(steps.fetch_modify_data.outputs[format("title_{0}", index)]),
+                "description": fromJson(steps.fetch_modify_data.outputs[format("description_{0}", index)]),
+                "thumbnailUrl": fromJson(steps.fetch_modify_data.outputs[format("thumbnailUrl_{0}", index)]),
+                "duration": fromJson(steps.fetch_modify_data.outputs[format("duration_{0}", index)]),
+                "viewCount": fromJson(steps.fetch_modify_data.outputs[format("viewCount_{0}", index)]),
+                "likeCount": fromJson(steps.fetch_modify_data.outputs[format("likeCount_{0}", index)]),
+                "commentCount": fromJson(steps.fetch_modify_data.outputs[format("commentCount_{0}", index)])
+              }
+            }) | toJSON }}
+
       - name: Create Playlist in Port
         uses: port-labs/port-github-action@v1
         with:
@@ -192,29 +222,7 @@ jobs:
               "videoCount": ${{ steps.fetch_modify_data.outputs.playlist_videoCount }},
               "created_at": "${{ steps.fetch_modify_data.outputs.playlist_created_at }}"
             }
-
-      - name: Upsert Video Data into Port
-        if: steps.fetch_modify_data.outputs.video_count > 0
-        uses: port-labs/port-github-action@v1
-        with:
-          clientId: ${{ secrets.PORT_CLIENT_ID }}
-          clientSecret: ${{ secrets.PORT_CLIENT_SECRET }}
-          baseUrl: https://api.getport.io
-          operation: UPSERT
-          identifier: ${{ steps.fetch_modify_data.outputs.videoId_0 }}
-          blueprint: video
-          properties: |-
-            {
-              "videoId": "${{ steps.fetch_modify_data.outputs.videoId_0 }}",
-              "title": "${{ steps.fetch_modify_data.outputs.title_0 }}",
-              "description": "${{ steps.fetch_modify_data.outputs.description_0 }}",
-              "thumbnailUrl": "${{ steps.fetch_modify_data.outputs.thumbnailUrl_0 }}",
-              "duration": "${{ steps.fetch_modify_data.outputs.duration_0 }}",
-              "viewCount": ${{ steps.fetch_modify_data.outputs.viewCount_0 }},
-              "likeCount": ${{ steps.fetch_modify_data.outputs.likeCount_0 }},
-              "commentCount": ${{ steps.fetch_modify_data.outputs.commentCount_0 }}
-            }
           relations: |-
             {
-              "belongs_to_playlist": "${{ steps.fetch_modify_data.outputs.playlist_playlistId }}"
+              "has_videos": ${{ fromJSON(steps.fetch_modify_data.outputs.video_ids) | map(videoId => videoId) | toJSON }}
             }
