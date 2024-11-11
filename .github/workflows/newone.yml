@@ -3,7 +3,11 @@ on:
   workflow_dispatch:
     inputs:
         playlistId:
-          type: string
+          description: 'name of playlist'
+          required: true
+        port_context:
+          description: 'Port context payload'
+          required: true
       
 jobs:
   update_port:
