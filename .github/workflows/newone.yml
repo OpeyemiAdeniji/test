@@ -15,6 +15,8 @@ jobs:
     env:
       PORT_CLIENT_ID: ${{ secrets.PORT_CLIENT_ID }}
       PORT_CLIENT_SECRET: ${{ secrets.PORT_CLIENT_SECRET }}
+      YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
+      PORT_RUN_ID: ${{ fromJson(inputs.port_context).runId }}
 
     steps:
       - name: Checkout code
@@ -33,47 +35,58 @@ jobs:
       - name: Fetch and Modify YouTube Playlist Data
         id: fetch_modify_data
         env:
-          YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
           PLAYLIST_ID: ${{ github.event.inputs.playlistid }}
         run: |
-          import os
-          import requests
-          import json
+          python -c "
+import os
+import requests
+import json
 
-          # Constants
-          YOUTUBE_API_KEY = os.environ['YOUTUBE_API_KEY']
-          playlist_id = os.environ['PLAYLIST_ID']
+# Constants
+YOUTUBE_API_KEY = os.environ['YOUTUBE_API_KEY']
+playlist_id = os.environ['PLAYLIST_ID']
 
-          # Fetch videos from YouTube playlist
-          def fetch_playlist_videos(playlist_id):
-              videos = []
-              url = f'https://www.googleapis.com/youtube/v3/playlistItems?part=snippet&maxResults=50&playlistId={playlist_id}&key={YOUTUBE_API_KEY}'
-              while url:
-                  response = requests.get(url)
-                  response.raise_for_status()
-                  data = response.json()
-                  videos.extend(data.get('items', []))
-                  next_page_token = data.get('nextPageToken')
-                  if next_page_token:
-                      url = f'https://www.googleapis.com/youtube/v3/playlistItems?part=snippet&maxResults=50&pageToken={next_page_token}&playlistId={playlist_id}&key={YOUTUBE_API_KEY}'
-                  else:
-                      url = None
-              return videos
+# Fetch videos from YouTube playlist
+def fetch_playlist_videos(playlist_id):
+    videos = []
+    url = f'https://www.googleapis.com/youtube/v3/playlistItems?part=snippet&maxResults=50&playlistId={playlist_id}&key={YOUTUBE_API_KEY}'
+    while url:
+        response = requests.get(url)
+        response.raise_for_status()
+        data = response.json()
+        videos.extend(data.get('items', []))
+        next_page_token = data.get('nextPageToken')
+        if next_page_token:
+            url = f'https://www.googleapis.com/youtube/v3/playlistItems?part=snippet&maxResults=50&pageToken={next_page_token}&playlistId={playlist_id}&key={YOUTUBE_API_KEY}'
+        else:
+            url = None
+    return videos
 
-          # Fetch data
-          videos = fetch_playlist_videos(playlist_id)
-          for i, video in enumerate(videos):
-              video_id = video['snippet']['resourceId']['videoId']
-              title = video['snippet']['title']
-              description = video['snippet']['description']
-              published_at = video['snippet']['publishedAt']
-              
-              print(f"::set-output name=video_id_{i}::{video_id}")
-              print(f"::set-output name=title_{i}::{title}")
-              print(f"::set-output name=description_{i}::{description}")
-              print(f"::set-output name=published_at_{i}::{published_at}")
-          
-          print(f"::set-output name=video_count::{len(videos)}")
+# Fetch data
+videos = fetch_playlist_videos(playlist_id)
+for i, video in enumerate(videos):
+    video_id = video['snippet']['resourceId']['videoId']
+    title = video['snippet']['title']
+    description = video['snippet']['description']
+    published_at = video['snippet']['publishedAt']
+    
+    print(f'::set-output name=video_id_{i}::{video_id}')
+    print(f'::set-output name=title_{i}::{title}')
+    print(f'::set-output name=description_{i}::{description}')
+    print(f'::set-output name=published_at_{i}::{published_at}')
+
+print(f'::set-output name=video_count::{len(videos)}')
+"
+
+      - name: Create a log message (apply)
+        uses: port-labs/port-github-action@v1
+        with:
+          clientId: ${{ secrets.PORT_CLIENT_ID }}
+          clientSecret: ${{ secrets.PORT_CLIENT_SECRET }}
+          baseUrl: https://api.getport.io
+          operation: PATCH_RUN
+          runId: ${{ env.PORT_RUN_ID }}
+          logMessage: "Initiating creation of YouTube playlist: ${{ inputs.playlistid }}."
 
       - name: Upsert Video Data into Port
         if: steps.fetch_modify_data.outputs.video_count > 0
@@ -84,7 +97,7 @@ jobs:
           baseUrl: https://api.getport.io
           operation: UPSERT
           identifier: ${{ steps.fetch_modify_data.outputs.video_id_0 }} # Example for the first video
-          blueprint: video
+          blueprint: YouTube Video
           properties: |-
             {
               "video_id": "${{ steps.fetch_modify_data.outputs.video_id_0 }}",
