@@ -27,15 +27,11 @@ jobs:
 
       - name: Modify Inputs with Python
         id: modify_inputs
-        env:
-          INPUT_NAME: ${{ github.event.inputs.name }}
-          INPUT_AGE: ${{ github.event.inputs.age }}
         run: |
-          import os
-          name = os.environ["INPUT_NAME"] + "-updated"
-          age = int(os.environ["INPUT_AGE"]) + 1000
-          print(f"::set-output name=modified_name::{name}")
-          print(f"::set-output name=modified_age::{age}")
+          name = "${{ github.event.inputs.name }}-updated"
+          age = ${{ github.event.inputs.age }} + 1000
+          echo "::set-output name=modified_name::${name}"
+          echo "::set-output name=modified_age::${age}"
 
       - name: Update Port
         uses: port-labs/port-github-action@v1
@@ -44,9 +40,9 @@ jobs:
           clientSecret: lZrhNU5u7W8plwejnnDshOuuIOlU6IN4rLBBzDIfnzarsdljw7X88lKgdlT5BsG9
           baseUrl: https://api.getport.io
           operation: UPSERT
-          identifier: myEntity
+          identifier: newone
           icon: myIcon
-          blueprint: myBlueprint
+          blueprint: newone
           team: "['myTeam']"
           properties: |-
             {
