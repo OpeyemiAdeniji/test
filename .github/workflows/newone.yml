@@ -2,7 +2,7 @@ name: Update Port with Modified Name
 on:
   workflow_dispatch:
     inputs:
-        playlistId:
+        playlistid:
           description: 'name of playlist'
           required: true
         port_context:
