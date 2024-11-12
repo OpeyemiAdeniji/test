@@ -55,13 +55,22 @@ jobs:
             echo $response | jq -r '.accessToken // empty'
           }
 
-          # Retrieve and validate the access token
-          ACCESS_TOKEN=$(get_port_access_token)
+          # Retrieve and sanitize the access token
+          ACCESS_TOKEN=$(get_port_access_token | tr -d '\n')
           if [[ -z "$ACCESS_TOKEN" ]]; then
             echo "Failed to retrieve access token. Response: $response"
             exit 1
           fi
+
+          # Print token for validation (first part only for security)
           echo "Access token obtained: ${ACCESS_TOKEN:0:5}***"
+          echo "Sanitized Access Token Length: ${#ACCESS_TOKEN}"
+
+          # Validate the JWT format (optional but useful for debugging)
+          if [[ "$ACCESS_TOKEN" != *.*.* ]]; then
+            echo "Invalid JWT format detected. Please check the token generation."
+            exit 1
+          fi
 
           # Fetch playlist details
           playlist_response=$(curl -s "https://www.googleapis.com/youtube/v3/playlists?part=snippet,contentDetails,status&id=${PLAYLIST_ID}&key=${YOUTUBE_API_KEY}")
