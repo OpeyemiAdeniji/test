@@ -166,23 +166,41 @@ jobs:
         if: steps.fetch_modify_data.outputs.video_count > 0
         run: |
           for i in $(seq 0 $((steps.fetch_modify_data.outputs.video_count - 1))); do
+            videoId_var="steps.fetch_modify_data.outputs.videoId_${i}"
+            title_var="steps.fetch_modify_data.outputs.title_${i}"
+            description_var="steps.fetch_modify_data.outputs.description_${i}"
+            thumbnailUrl_var="steps.fetch_modify_data.outputs.thumbnailUrl_${i}"
+            duration_var="steps.fetch_modify_data.outputs.duration_${i}"
+            viewCount_var="steps.fetch_modify_data.outputs.viewCount_${i}"
+            likeCount_var="steps.fetch_modify_data.outputs.likeCount_${i}"
+            commentCount_var="steps.fetch_modify_data.outputs.commentCount_${i}"
+            
+            eval videoId=\${{ ${videoId_var} }}
+            eval title=\${{ ${title_var} }}
+            eval description=\${{ ${description_var} }}
+            eval thumbnailUrl=\${{ ${thumbnailUrl_var} }}
+            eval duration=\${{ ${duration_var} }}
+            eval viewCount=\${{ ${viewCount_var} }}
+            eval likeCount=\${{ ${likeCount_var} }}
+            eval commentCount=\${{ ${commentCount_var} }}
+
             echo "Upserting video $i"
             gh api --method POST https://api.getport.io/v1/your-endpoint \
               -H "Authorization: Bearer ${{ secrets.PORT_CLIENT_SECRET }}" \
               -H "Content-Type: application/json" \
-              --field identifier="${{ steps.fetch_modify_data.outputs['videoId_'${i}] }}" \
+              --field identifier="$videoId" \
               --field blueprint="video" \
-              --field properties='{
-                "videoId": "${{ steps.fetch_modify_data.outputs['videoId_'${i}] }}",
-                "title": "${{ steps.fetch_modify_data.outputs['title_'${i}] }}",
-                "description": "${{ steps.fetch_modify_data.outputs['description_'${i}] }}",
-                "thumbnailUrl": "${{ steps.fetch_modify_data.outputs['thumbnailUrl_'${i}] }}",
-                "duration": "${{ steps.fetch_modify_data.outputs['duration_'${i}] }}",
-                "viewCount": ${{ steps.fetch_modify_data.outputs['viewCount_'${i}] }},
-                "likeCount": ${{ steps.fetch_modify_data.outputs['likeCount_'${i}] }},
-                "commentCount": ${{ steps.fetch_modify_data.outputs['commentCount_'${i}] }}
-              }' \
-              --field relations='{
-                "belongs_to_playlist": "${{ steps.fetch_modify_data.outputs.playlist_playlistId }}"
-              }'
+              --field properties="{
+                \"videoId\": \"$videoId\",
+                \"title\": \"$title\",
+                \"description\": \"$description\",
+                \"thumbnailUrl\": \"$thumbnailUrl\",
+                \"duration\": \"$duration\",
+                \"viewCount\": $viewCount,
+                \"likeCount\": $likeCount,
+                \"commentCount\": $commentCount
+              }" \
+              --field relations="{
+                \"belongs_to_playlist\": \"${{ steps.fetch_modify_data.outputs.playlist_playlistId }}\"
+              }"
           done
