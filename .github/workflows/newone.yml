@@ -188,7 +188,7 @@ jobs:
           clientSecret: ${{ secrets.PORT_CLIENT_SECRET }}
           baseUrl: https://api.getport.io
           operation: BULK_UPSERT
-          blueprint: video
+          blueprint: youtube_video  # Changed from 'video' to be more specific
           entities: ${{ steps.fetch_modify_data.outputs.video_items }}
 
       - name: Create Playlist in Port
@@ -198,7 +198,7 @@ jobs:
           clientSecret: ${{ secrets.PORT_CLIENT_SECRET }}
           baseUrl: https://api.getport.io
           operation: UPSERT
-          blueprint: playlist
+          blueprint: youtube_playlist  # Changed from 'playlist' to be more specific
           identifier: ${{ steps.fetch_modify_data.outputs.playlist_playlistId }}
           properties: |-
             {
