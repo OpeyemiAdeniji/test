@@ -93,8 +93,8 @@ jobs:
           echo "Payload: $playlist_entity"
           echo "$playlist_entity" | jq .
 
-          # Verbose curl for detailed debugging
-          curl -v -X POST "https://api.getport.io/v1/blueprints/playlist/entities?upsert=true" \
+          # Use HTTP/1.1 to avoid HTTP/2 protocol issues
+          curl --http1.1 -v -X POST "https://api.getport.io/v1/blueprints/playlist/entities?upsert=true" \
             -H "Authorization: Bearer $ACCESS_TOKEN" \
             -H "Content-Type: application/json" \
             -d "$playlist_entity"
@@ -145,8 +145,8 @@ jobs:
               echo "Video Payload: $video_entity"
               echo "$video_entity" | jq .
 
-              # Upload video to Port
-              curl -v -X POST "https://api.getport.io/v1/blueprints/video/entities?upsert=true" \
+              # Use HTTP/1.1 to avoid HTTP/2 protocol issues for video upload
+              curl --http1.1 -v -X POST "https://api.getport.io/v1/blueprints/video/entities?upsert=true" \
                 -H "Authorization: Bearer $ACCESS_TOKEN" \
                 -H "Content-Type: application/json" \
                 -d "$video_entity"
