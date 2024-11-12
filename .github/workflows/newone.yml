@@ -19,9 +19,20 @@ jobs:
       PORT_RUN_ID: ${{ fromJson(inputs.port_context).runId }}
 
     steps:
-      # ... (previous steps remain the same until fetch_youtube.py) ...
+      - name: Checkout code
+        uses: actions/checkout@v4
 
-      - name: Modify fetch_youtube.py to output video count correctly
+      - name: Set up Python
+        uses: actions/setup-python@v2
+        with:
+          python-version: '3.x'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install requests
+
+      - name: Create Python script
         run: |
           cat << 'EOF' > fetch_youtube.py
           import os
@@ -29,41 +40,125 @@ jobs:
           import json
           from datetime import datetime
 
-          # ... (previous code remains the same until the end) ...
+          # Constants
+          YOUTUBE_API_KEY = os.environ['YOUTUBE_API_KEY']
+          playlist_id = os.environ['PLAYLIST_ID']
 
-          # Fetch videos
-          videos = fetch_playlist_videos(playlist_id)
+          def fetch_playlist_details(playlist_id):
+              url = f'https://www.googleapis.com/youtube/v3/playlists?part=snippet,contentDetails,status&id={playlist_id}&key={YOUTUBE_API_KEY}'
+              response = requests.get(url)
+              response.raise_for_status()
+              return response.json()['items'][0]
 
-          # Write video count first
-          with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as fh:
-              print(f"video_count={len(videos)}", file=fh)
-              print(f"total_videos={len(videos)}", file=fh)  # Adding a backup count
+          def fetch_video_details(video_id):
+              url = f'https://www.googleapis.com/youtube/v3/videos?part=snippet,contentDetails,statistics&id={video_id}&key={YOUTUBE_API_KEY}'
+              response = requests.get(url)
+              response.raise_for_status()
+              return response.json()['items'][0]
 
-          # Write video data to GITHUB_OUTPUT
-          with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as fh:
-              for i, video in enumerate(videos):
-                  snippet = video['snippet']
-                  statistics = video.get('statistics', {})
-                  content_details = video.get('contentDetails', {})
-                  
-                  video_data = {
-                      "videoId": video['id'],
-                      "title": sanitize_value(snippet['title']),
-                      "description": sanitize_value(snippet['description']),
-                      "thumbnailUrl": snippet['thumbnails']['default']['url'],
-                      "duration": content_details.get('duration', ''),
-                      "viewCount": int(statistics.get('viewCount', 0)),
-                      "likeCount": int(statistics.get('likeCount', 0)),
-                      "commentCount": int(statistics.get('commentCount', 0))
-                  }
-                  
-                  for key, value in video_data.items():
+          def fetch_playlist_videos(playlist_id):
+              videos = []
+              url = f'https://www.googleapis.com/youtube/v3/playlistItems?part=snippet&maxResults=50&playlistId={playlist_id}&key={YOUTUBE_API_KEY}'
+              
+              try:
+                  while url:
+                      response = requests.get(url)
+                      response.raise_for_status()
+                      data = response.json()
+                      
+                      for item in data.get('items', []):
+                          video_id = item['snippet']['resourceId']['videoId']
+                          try:
+                              video_details = fetch_video_details(video_id)
+                              videos.append(video_details)
+                          except Exception as e:
+                              print(f"Error fetching details for video {video_id}: {str(e)}")
+                      
+                      next_page_token = data.get('nextPageToken')
+                      if next_page_token:
+                          url = f'https://www.googleapis.com/youtube/v3/playlistItems?part=snippet&maxResults=50&pageToken={next_page_token}&playlistId={playlist_id}&key={YOUTUBE_API_KEY}'
+                      else:
+                          url = None
+              except Exception as e:
+                  print(f"Error fetching playlist videos: {str(e)}")
+                  raise
+              
+              return videos
+
+          def sanitize_value(value):
+              if isinstance(value, str):
+                  # Replace newlines with spaces and escape special characters
+                  return value.replace('\n', ' ').replace('\r', ' ').replace('"', '\\"').strip()
+              return value
+
+          try:
+              # First fetch playlist details
+              print("Fetching playlist details...")
+              playlist = fetch_playlist_details(playlist_id)
+              playlist_data = {
+                  "playlistId": playlist['id'],
+                  "title": sanitize_value(playlist['snippet']['title']),
+                  "description": sanitize_value(playlist['snippet']['description']),
+                  "thumbnailUrl": playlist['snippet']['thumbnails']['default']['url'],
+                  "videoCount": playlist['contentDetails']['itemCount'],
+                  "created_at": playlist['snippet']['publishedAt']
+              }
+
+              # Write playlist data to GITHUB_OUTPUT
+              print("Writing playlist data...")
+              with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as fh:
+                  for key, value in playlist_data.items():
                       if isinstance(value, str):
-                          print(f"{key}_{i}<<EOF", file=fh)
+                          print(f"playlist_{key}<<EOF", file=fh)
                           print(f"{value}", file=fh)
                           print("EOF", file=fh)
                       else:
-                          print(f"{key}_{i}={value}", file=fh)
+                          print(f"playlist_{key}={value}", file=fh)
+
+              # Fetch videos
+              print("Fetching video details...")
+              videos = fetch_playlist_videos(playlist_id)
+              print(f"Found {len(videos)} videos")
+
+              # Write video count first
+              with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as fh:
+                  print(f"video_count={len(videos)}", file=fh)
+
+              # Write video data to GITHUB_OUTPUT
+              print("Writing video data...")
+              with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as fh:
+                  for i, video in enumerate(videos):
+                      print(f"Processing video {i + 1} of {len(videos)}")
+                      snippet = video['snippet']
+                      statistics = video.get('statistics', {})
+                      content_details = video.get('contentDetails', {})
+                      
+                      video_data = {
+                          "videoId": video['id'],
+                          "title": sanitize_value(snippet['title']),
+                          "description": sanitize_value(snippet['description']),
+                          "thumbnailUrl": snippet['thumbnails']['default']['url'],
+                          "duration": content_details.get('duration', ''),
+                          "viewCount": int(statistics.get('viewCount', 0)),
+                          "likeCount": int(statistics.get('likeCount', 0)),
+                          "commentCount": int(statistics.get('commentCount', 0))
+                      }
+                      
+                      for key, value in video_data.items():
+                          if isinstance(value, str):
+                              print(f"{key}_{i}<<EOF", file=fh)
+                              print(f"{value}", file=fh)
+                              print("EOF", file=fh)
+                          else:
+                              print(f"{key}_{i}={value}", file=fh)
+
+          except Exception as e:
+              print(f"Error: {str(e)}")
+              print("Environment variables:")
+              for key, value in os.environ.items():
+                  if key.startswith(('YOUTUBE', 'PLAYLIST')):
+                      print(f"{key}: {value}")
+              raise
           EOF
 
       - name: Fetch and Modify YouTube Playlist Data
@@ -76,79 +171,53 @@ jobs:
       - name: Debug Output
         run: |
           echo "Video count: ${{ steps.fetch_modify_data.outputs.video_count }}"
-          echo "Total videos: ${{ steps.fetch_modify_data.outputs.total_videos }}"
+          echo "Playlist ID: ${{ steps.fetch_modify_data.outputs.playlist_playlistId }}"
 
-      - name: Create Python script for video upsertion
-        run: |
-          cat << 'EOF' > upsert_videos.py
-          import os
-          import json
-          import sys
-
-          try:
-              video_count = int(os.environ.get('VIDEO_COUNT', '0'))
-              print(f"Processing {video_count} videos")
-              
-              if video_count == 0:
-                  print("No videos found to process")
-                  sys.exit(0)
-                  
-              for i in range(video_count):
-                  video_data = {
-                      "identifier": os.environ[f'VIDEOID_{i}'],
-                      "properties": {
-                          "videoId": os.environ[f'VIDEOID_{i}'],
-                          "title": os.environ[f'TITLE_{i}'],
-                          "description": os.environ[f'DESCRIPTION_{i}'],
-                          "thumbnailUrl": os.environ[f'THUMBNAILURL_{i}'],
-                          "duration": os.environ[f'DURATION_{i}'],
-                          "viewCount": int(os.environ[f'VIEWCOUNT_{i}']),
-                          "likeCount": int(os.environ[f'LIKECOUNT_{i}']),
-                          "commentCount": int(os.environ[f'COMMENTCOUNT_{i}'])
-                      },
-                      "relations": {
-                          "belongs_to_playlist": os.environ['PLAYLIST_ID']
-                      }
-                  }
-                  
-                  # Write each video's data to a separate file
-                  with open(f'video_data_{i}.json', 'w') as f:
-                      json.dump(video_data, f)
-              
-              # Write the count to GITHUB_OUTPUT
-              with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
-                  print(f"video_count={video_count}", file=f)
-                  
-          except Exception as e:
-              print(f"Error processing videos: {str(e)}")
-              print("Environment variables:")
-              for key, value in os.environ.items():
-                  if key.startswith(('VIDEO', 'PLAYLIST')):
-                      print(f"{key}: {value}")
-              sys.exit(1)
-          EOF
-
-      - name: Prepare Video Data
-        id: prepare_videos
-        env:
-          VIDEO_COUNT: ${{ steps.fetch_modify_data.outputs.video_count }}
-          PLAYLIST_ID: ${{ steps.fetch_modify_data.outputs.playlist_playlistId }}
-        run: python upsert_videos.py
+      - name: Create Playlist in Port
+        uses: port-labs/port-github-action@v1
+        with:
+          clientId: ${{ secrets.PORT_CLIENT_ID }}
+          clientSecret: ${{ secrets.PORT_CLIENT_SECRET }}
+          baseUrl: https://api.getport.io
+          operation: UPSERT
+          identifier: ${{ steps.fetch_modify_data.outputs.playlist_playlistId }}
+          blueprint: playlist
+          properties: |-
+            {
+              "playlistId": "${{ steps.fetch_modify_data.outputs.playlist_playlistId }}",
+              "title": "${{ steps.fetch_modify_data.outputs.playlist_title }}",
+              "description": "${{ steps.fetch_modify_data.outputs.playlist_description }}",
+              "thumbnailUrl": "${{ steps.fetch_modify_data.outputs.playlist_thumbnailUrl }}",
+              "videoCount": ${{ steps.fetch_modify_data.outputs.playlist_videoCount }},
+              "created_at": "${{ steps.fetch_modify_data.outputs.playlist_created_at }}"
+            }
 
       - name: Upsert Videos to Port
-        if: steps.prepare_videos.outputs.video_count > 0
+        if: ${{ steps.fetch_modify_data.outputs.video_count > 0 }}
         run: |
-          for i in $(seq 0 $((${{ steps.prepare_videos.outputs.video_count }} - 1))); do
-            echo "Processing video $i"
-            if [ -f "video_data_$i.json" ]; then
-              echo "Upserting video $i"
-              curl -X POST "https://api.getport.io/v1/blueprints/video/entities?upsert=true" \
-                -H "Content-Type: application/json" \
-                -H "Authorization: Bearer ${{ env.PORT_ACCESS_TOKEN }}" \
-                --data-binary "@video_data_$i.json"
-            else
-              echo "Warning: video_data_$i.json not found"
-            fi
+          for i in $(seq 0 $((${{ steps.fetch_modify_data.outputs.video_count }} - 1))); do
+            echo "Upserting video $i"
+            curl -X POST "https://api.getport.io/v1/blueprints/video/entities?upsert=true" \
+              -H "Content-Type: application/json" \
+              -H "Authorization: Bearer ${{ env.PORT_ACCESS_TOKEN }}" \
+              --data @- << EOF
+            {
+              "identifier": "${{ steps.fetch_modify_data.outputs.videoId_${i} }}",
+              "properties": {
+                "videoId": "${{ steps.fetch_modify_data.outputs.videoId_${i} }}",
+                "title": "${{ steps.fetch_modify_data.outputs.title_${i} }}",
+                "description": "${{ steps.fetch_modify_data.outputs.description_${i} }}",
+                "thumbnailUrl": "${{ steps.fetch_modify_data.outputs.thumbnailUrl_${i} }}",
+                "duration": "${{ steps.fetch_modify_data.outputs.duration_${i} }}",
+                "viewCount": ${{ steps.fetch_modify_data.outputs.viewCount_${i} }},
+                "likeCount": ${{ steps.fetch_modify_data.outputs.likeCount_${i} }},
+                "commentCount": ${{ steps.fetch_modify_data.outputs.commentCount_${i} }}
+              },
+              "relations": {
+                "belongs_to_playlist": "${{ steps.fetch_modify_data.outputs.playlist_playlistId }}"
+              }
+            }
+          EOF
           done
         env:
           PORT_CLIENT_SECRET: ${{ secrets.PORT_CLIENT_SECRET }}
