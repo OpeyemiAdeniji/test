@@ -47,13 +47,12 @@ jobs:
           PORT_CLIENT_SECRET = os.environ['PORT_CLIENT_SECRET']
           API_URL = 'https://api.getport.io/v1'
 
-          print(playlist_id)
-          print()
+          print(f"Processing playlist ID: {playlist_id}")
           
           credentials = {
               'clientId': PORT_CLIENT_ID,
               'clientSecret': PORT_CLIENT_SECRET
-                }
+          }
 
           def fetch_playlist_details(playlist_id):
               url = f'https://www.googleapis.com/youtube/v3/playlists?part=snippet,contentDetails,status&id={playlist_id}&key={YOUTUBE_API_KEY}'
@@ -91,15 +90,17 @@ jobs:
               return value
 
           # Get Port access token
-
+          print("Getting Port access token...")
           token_response = requests.post(f'{API_URL}/auth/access_token', json=credentials)
+          token_response.raise_for_status()
           access_token = token_response.json()['accessToken']
 
           headers = {
-                'Authorization': f'Bearer {access_token}'
-            }
+              'Authorization': f'Bearer {access_token}'
+          }
 
           # Fetch playlist details
+          print("Fetching playlist details...")
           playlist = fetch_playlist_details(playlist_id)
 
           # Create playlist in Port
@@ -116,13 +117,23 @@ jobs:
               }
           }
 
-          playlist_response = requests.post(f'{API_URL}/blueprints/youtubePlaylist/entities?upsert=true',json=playlist_entity,headers=headers)
+          # Upload playlist to Port
+          print("Uploading playlist to Port...")
+          playlist_response = requests.post(
+              f'{API_URL}/blueprints/playlist/entities?upsert=true',
+              json=playlist_entity,
+              headers=headers
+          )
+          playlist_response.raise_for_status()
           print(f"Playlist sync status: {playlist_response.status_code}")
 
           # Fetch and upload videos
+          print("Fetching videos...")
           videos = fetch_playlist_videos(playlist_id)
+          print(f"Found {len(videos)} videos")
           
-          for video in videos:
+          for i, video in enumerate(videos, 1):
+              print(f"Processing video {i} of {len(videos)}")
               snippet = video['snippet']
               statistics = video.get('statistics', {})
               content_details = video.get('contentDetails', {})
@@ -145,8 +156,23 @@ jobs:
                   }
               }
               
-              playlist_response = requests.post(f'{API_URL}/blueprints/youtubePlaylist/entities?upsert=true',json=playlist_entity,headers=headers)
-              print(f"Playlist sync status: {playlist_response.status_code}")
+              # Upload video to Port
+              video_response = requests.post(
+                  f'{API_URL}/blueprints/video/entities?upsert=true',
+                  json=video_data,
+                  headers=headers
+              )
+              video_response.raise_for_status()
+              print(f"Video {video['id']} sync status: {video_response.status_code}")
 
+          print("Processing complete!")
           EOF
 
+      - name: Fetch and Process YouTube Data
+        id: fetch_data
+        env:
+          YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
+          PLAYLIST_ID: ${{ inputs.playlistid }}
+          PORT_CLIENT_ID: ${{ secrets.PORT_CLIENT_ID }}
+          PORT_CLIENT_SECRET: ${{ secrets.PORT_CLIENT_SECRET }}
+        run: python fetch_youtube.py
