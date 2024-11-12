@@ -159,28 +159,31 @@ jobs:
               "created_at": "${{ steps.fetch_modify_data.outputs.playlist_created_at }}"
             }
 
-      - name: Upsert Video Data into Port
-        if: steps.fetch_modify_data.outputs.video_count > 0
-        uses: port-labs/port-github-action@v1
-        with:
-          clientId: ${{ secrets.PORT_CLIENT_ID }}
-          clientSecret: ${{ secrets.PORT_CLIENT_SECRET }}
-          baseUrl: https://api.getport.io
-          operation: UPSERT
-          identifier: ${{ steps.fetch_modify_data.outputs.videoId_0 }}
-          blueprint: video
-          properties: |-
+      - name: Create Bash Script for Video Processing
+        run: |
+          cat << 'EOF' > process_videos.sh
+          #!/bin/bash
+          
+          VIDEO_COUNT="${{ steps.fetch_modify_data.outputs.video_count }}"
+          
+          for i in $(seq 0 $((VIDEO_COUNT-1))); do
+            echo "Processing video $i"
+            
+            # Use the port-github-action for each video
+            # The environment variables are available in the GitHub Actions context
             {
-              "videoId": "${{ steps.fetch_modify_data.outputs.videoId_0 }}",
-              "title": "${{ steps.fetch_modify_data.outputs.title_0 }}",
-              "description": "${{ steps.fetch_modify_data.outputs.description_0 }}",
-              "thumbnailUrl": "${{ steps.fetch_modify_data.outputs.thumbnailUrl_0 }}",
-              "duration": "${{ steps.fetch_modify_data.outputs.duration_0 }}",
-              "viewCount": ${{ steps.fetch_modify_data.outputs.viewCount_0 }},
-              "likeCount": ${{ steps.fetch_modify_data.outputs.likeCount_0 }},
-              "commentCount": ${{ steps.fetch_modify_data.outputs.commentCount_0 }}
-            }
-          relations: |-
-            {
-              "belongs_to_playlist": "${{ steps.fetch_modify_data.outputs.playlist_playlistId }}"
-            }
+              echo "clientId=$PORT_CLIENT_ID"
+              echo "clientSecret=$PORT_CLIENT_SECRET"
+              echo "baseUrl=https://api.getport.io"
+              echo "operation=UPSERT"
+              echo "identifier=${{ steps.fetch_modify_data.outputs[format('videoId_{0}', i)] }}"
+              echo "blueprint=video"
+              echo "properties={\"videoId\": \"${{ steps.fetch_modify_data.outputs[format('videoId_{0}', i)] }}\", \"title\": \"${{ steps.fetch_modify_data.outputs[format('title_{0}', i)] }}\", \"description\": \"${{ steps.fetch_modify_data.outputs[format('description_{0}', i)] }}\", \"thumbnailUrl\": \"${{ steps.fetch_modify_data.outputs[format('thumbnailUrl_{0}', i)] }}\", \"duration\": \"${{ steps.fetch_modify_data.outputs[format('duration_{0}', i)] }}\", \"viewCount\": ${{ steps.fetch_modify_data.outputs[format('viewCount_{0}', i)] }}, \"likeCount\": ${{ steps.fetch_modify_data.outputs[format('likeCount_{0}', i)] }}, \"commentCount\": ${{ steps.fetch_modify_data.outputs[format('commentCount_{0}', i)] }}}"
+              echo "relations={\"belongs_to_playlist\": \"${{ steps.fetch_modify_data.outputs.playlist_playlistId }}\"}"
+            } | npx port-github-action
+          done
+          EOF
+          chmod +x process_videos.sh
+
+      - name: Process All Videos
+        run: ./process_videos.sh
