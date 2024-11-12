@@ -15,19 +15,23 @@ jobs:
     env:
       PORT_CLIENT_ID: ${{ secrets.PORT_CLIENT_ID }}
       PORT_CLIENT_SECRET: ${{ secrets.PORT_CLIENT_SECRET }}
-      YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      PORT_RUN_ID: ${{ fromJson(inputs.port_context).runId }}
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Install dependencies
-        run: sudo apt-get update && sudo apt-get install -y jq
+      - name: Install jq for JSON processing
+        run: sudo apt-get install jq
 
       - name: Fetch and Process YouTube Data using Bash
         id: fetch_data
         env:
+          YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
           PLAYLIST_ID: ${{ inputs.playlistid }}
+          PORT_CLIENT_ID: ${{ secrets.PORT_CLIENT_ID }}
+          PORT_CLIENT_SECRET: ${{ secrets.PORT_CLIENT_SECRET }}
         run: |
           # Function to get Port access token
           get_port_access_token() {
@@ -37,24 +41,8 @@ jobs:
                 "clientId": "'"$PORT_CLIENT_ID"'",
                 "clientSecret": "'"$PORT_CLIENT_SECRET"'"
               }')
-
-            if [[ $? -ne 0 ]]; then
-              echo "Failed to fetch Port access token"
-              exit 1
-            fi
-
-            access_token=$(echo $response | jq -r '.accessToken')
-            if [[ "$access_token" == "null" || -z "$access_token" ]]; then
-              echo "Invalid Port access token response"
-              exit 1
-            fi
-
-            echo $access_token
+            echo $response | jq -r '.accessToken'
           }
-
-          # Install dependencies check
-          which jq &>/dev/null || { echo "jq is required but not installed"; exit 1; }
-          which curl &>/dev/null || { echo "curl is required but not installed"; exit 1; }
 
           # Get access token
           ACCESS_TOKEN=$(get_port_access_token)
@@ -62,12 +50,6 @@ jobs:
 
           # Fetch playlist details
           playlist_response=$(curl -s "https://www.googleapis.com/youtube/v3/playlists?part=snippet,contentDetails,status&id=${PLAYLIST_ID}&key=${YOUTUBE_API_KEY}")
-          if [[ $? -ne 0 || $(echo $playlist_response | jq -r '.error') != "null" ]]; then
-            echo "Failed to fetch playlist details"
-            exit 1
-          fi
-
-          # Parse playlist details
           playlist_id=$(echo $playlist_response | jq -r '.items[0].id')
           playlist_title=$(echo $playlist_response | jq -r '.items[0].snippet.title')
           playlist_description=$(echo $playlist_response | jq -r '.items[0].snippet.description')
@@ -93,17 +75,10 @@ jobs:
             }')
 
           # Upload playlist to Port
-          playlist_upload_response=$(curl -s -X POST "https://api.getport.io/v1/blueprints/playlist/entities?upsert=true" \
+          curl -s -X POST "https://api.getport.io/v1/blueprints/playlist/entities?upsert=true" \
             -H "Authorization: Bearer $ACCESS_TOKEN" \
             -H "Content-Type: application/json" \
-            -d "$playlist_entity")
-
-          if [[ $? -ne 0 || $(echo $playlist_upload_response | jq -r '.error') != "null" ]]; then
-            echo "Failed to upload playlist to Port"
-            exit 1
-          fi
-
-          echo "Playlist uploaded successfully"
+            -d "$playlist_entity"
 
           # Fetch and process videos in the playlist
           next_page_token=""
@@ -112,19 +87,9 @@ jobs:
             response=$(curl -s "$url")
             next_page_token=$(echo $response | jq -r '.nextPageToken // empty')
 
-            if [[ $? -ne 0 || $(echo $response | jq -r '.error') != "null" ]]; then
-              echo "Failed to fetch videos from playlist"
-              exit 1
-            fi
-
             video_ids=$(echo $response | jq -r '.items[].snippet.resourceId.videoId')
             for video_id in $video_ids; do
               video_details=$(curl -s "https://www.googleapis.com/youtube/v3/videos?part=snippet,contentDetails,statistics&id=$video_id&key=${YOUTUBE_API_KEY}")
-              if [[ $? -ne 0 || $(echo $video_details | jq -r '.error') != "null" ]]; then
-                echo "Failed to fetch details for video ID $video_id"
-                continue
-              fi
-
               video_title=$(echo $video_details | jq -r '.items[0].snippet.title')
               video_description=$(echo $video_details | jq -r '.items[0].snippet.description')
               video_thumbnail=$(echo $video_details | jq -r '.items[0].snippet.thumbnails.default.url')
@@ -158,19 +123,11 @@ jobs:
                 }')
 
               # Upload video to Port
-              video_upload_response=$(curl -s -X POST "https://api.getport.io/v1/blueprints/video/entities?upsert=true" \
+              curl -s -X POST "https://api.getport.io/v1/blueprints/video/entities?upsert=true" \
                 -H "Authorization: Bearer $ACCESS_TOKEN" \
                 -H "Content-Type: application/json" \
-                -d "$video_entity")
-
-              if [[ $? -ne 0 || $(echo $video_upload_response | jq -r '.error') != "null" ]]; then
-                echo "Failed to upload video ID $video_id to Port"
-              else
-                echo "Video ID $video_id uploaded successfully"
-              fi
+                -d "$video_entity"
             done
 
             [[ -z "$next_page_token" ]] && break
           done
-
-          echo "All videos processed successfully"
