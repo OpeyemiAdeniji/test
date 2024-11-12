@@ -33,7 +33,7 @@ jobs:
           PORT_CLIENT_ID: ${{ secrets.PORT_CLIENT_ID }}
           PORT_CLIENT_SECRET: ${{ secrets.PORT_CLIENT_SECRET }}
         run: |
-          set -x  # Enable command tracing for debugging
+          set -e  # Exit immediately if any command returns a non-zero status
 
           # Ensure environment variables are trimmed of whitespace
           PORT_CLIENT_ID=$(echo "$PORT_CLIENT_ID" | xargs)
@@ -47,22 +47,34 @@ jobs:
                 "clientId": "'"$PORT_CLIENT_ID"'",
                 "clientSecret": "'"$PORT_CLIENT_SECRET"'"
               }')
-            echo "Token response: $response"  # Print response for debugging
-            echo $response | jq -r '.accessToken // empty'
+
+            # Check if the response contains an error
+            if echo "$response" | grep -q '"ok":false'; then
+              echo "Error obtaining access token: $(echo "$response" | jq -r '.error' )"
+              return 1
+            fi
+
+            # Extract the access token from the response
+            access_token=$(echo "$response" | jq -r '.accessToken // empty')
+            if [ -z "$access_token" ]; then
+              echo "Failed to retrieve access token. Response: $response"
+              return 1
+            fi
+
+            echo "$access_token"
           }
 
           # Retrieve and sanitize the access token
-          ACCESS_TOKEN=$(get_port_access_token | tr -d '\n' | tr -d '\r')
-          if [[ -z "$ACCESS_TOKEN" ]]; then
-            echo "Failed to retrieve access token. Response: $response"
+          ACCESS_TOKEN=$(get_port_access_token)
+          if [ -z "$ACCESS_TOKEN" ]; then
+            echo "Failed to obtain access token. Exiting."
             exit 1
           fi
 
-          # Print the token for validation (truncate for security)
           echo "Access token obtained: ${ACCESS_TOKEN:0:50}..."
 
           # Validate the JWT format
-          if [[ "$ACCESS_TOKEN" != *.*.* ]]; then
+          if ! [[ "$ACCESS_TOKEN" =~ ^[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]+$ ]]; then
             echo "Invalid JWT format detected. Please check the token generation."
             exit 1
           fi
