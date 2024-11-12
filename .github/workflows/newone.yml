@@ -59,6 +59,22 @@ jobs:
               s = s.replace(',', '%2C')
               return s.strip()
 
+          def format_duration(duration):
+              """Convert YouTube duration format to readable format"""
+              duration = duration.replace('PT', '')
+              hours = '0'
+              minutes = '0'
+              seconds = '0'
+              
+              if 'H' in duration:
+                  hours, duration = duration.split('H')
+              if 'M' in duration:
+                  minutes, duration = duration.split('M')
+              if 'S' in duration:
+                  seconds = duration.replace('S', '')
+                  
+              return f"{hours.zfill(2)}:{minutes.zfill(2)}:{seconds.zfill(2)}"
+
           def fetch_playlist_details(playlist_id):
               try:
                   url = f'https://www.googleapis.com/youtube/v3/playlists?part=snippet,contentDetails,status&id={playlist_id}&key={YOUTUBE_API_KEY}'
@@ -115,12 +131,15 @@ jobs:
                                   "properties": {
                                       "videoId": video_id,
                                       "title": snippet['title'],
-                                      "description": snippet['description'],
+                                      "description": snippet.get('description', 'No description available'),
                                       "thumbnailUrl": snippet.get('thumbnails', {}).get('default', {}).get('url', ''),
-                                      "duration": content_details.get('duration', ''),
+                                      "duration": format_duration(content_details.get('duration', 'PT0S')),
                                       "viewCount": int(statistics.get('viewCount', 0)),
                                       "likeCount": int(statistics.get('likeCount', 0)),
                                       "commentCount": int(statistics.get('commentCount', 0))
+                                  },
+                                  "relations": {
+                                      "belongs_to_playlist": [playlist_id]
                                   }
                               }
                               video_data_list.append(video_data)
@@ -140,18 +159,22 @@ jobs:
               # Fetch playlist details
               playlist = fetch_playlist_details(playlist_id)
               playlist_data = {
-                  "playlistId": playlist['id'],
+                  "identifier": playlist_id,
                   "title": playlist['snippet']['title'],
-                  "description": playlist['snippet']['description'],
-                  "thumbnailUrl": playlist['snippet'].get('thumbnails', {}).get('default', {}).get('url', ''),
-                  "videoCount": playlist['contentDetails']['itemCount'],
-                  "created_at": playlist['snippet']['publishedAt']
+                  "properties": {
+                      "playlistId": playlist['id'],
+                      "title": playlist['snippet']['title'],
+                      "description": playlist['snippet'].get('description', 'No description available'),
+                      "thumbnailUrl": playlist['snippet'].get('thumbnails', {}).get('default', {}).get('url', ''),
+                      "videoCount": playlist['contentDetails']['itemCount'],
+                      "createdAt": playlist['snippet']['publishedAt']
+                  }
               }
 
               # Write playlist data to GITHUB_OUTPUT
               with open(os.environ['GITHUB_OUTPUT'], 'a') as fh:
                   for key, value in playlist_data.items():
-                      sanitized_value = sanitize_string(value)
+                      sanitized_value = sanitize_string(str(value))
                       print(f"playlist_{key}={sanitized_value}", file=fh)
 
               # Fetch videos
@@ -188,7 +211,7 @@ jobs:
           clientSecret: ${{ secrets.PORT_CLIENT_SECRET }}
           baseUrl: https://api.getport.io
           operation: BULK_UPSERT
-          blueprint: youtube_video  # Changed from 'video' to be more specific
+          blueprint: youtube_video
           entities: ${{ steps.fetch_modify_data.outputs.video_items }}
 
       - name: Create Playlist in Port
@@ -198,16 +221,16 @@ jobs:
           clientSecret: ${{ secrets.PORT_CLIENT_SECRET }}
           baseUrl: https://api.getport.io
           operation: UPSERT
-          blueprint: youtube_playlist  # Changed from 'playlist' to be more specific
+          blueprint: youtube_playlist
           identifier: ${{ steps.fetch_modify_data.outputs.playlist_playlistId }}
           properties: |-
             {
-              "playlistId": "${{ steps.fetch_modify_data.outputs.playlist_playlistId }}",
               "title": "${{ steps.fetch_modify_data.outputs.playlist_title }}",
+              "playlistId": "${{ steps.fetch_modify_data.outputs.playlist_playlistId }}",
               "description": "${{ steps.fetch_modify_data.outputs.playlist_description }}",
               "thumbnailUrl": "${{ steps.fetch_modify_data.outputs.playlist_thumbnailUrl }}",
               "videoCount": ${{ steps.fetch_modify_data.outputs.playlist_videoCount }},
-              "created_at": "${{ steps.fetch_modify_data.outputs.playlist_created_at }}"
+              "createdAt": "${{ steps.fetch_modify_data.outputs.playlist_created_at }}"
             }
           relations: |-
             {
