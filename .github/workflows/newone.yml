@@ -144,8 +144,9 @@ jobs:
           blueprint: playlist
           properties: ${{ steps.fetch_modify_data.outputs.playlist_data }}
 
-      - name: Create Port API Script for Videos
+      - name: Process Videos Data
         if: steps.fetch_modify_data.outputs.videos_data != ''
+        id: process_videos
         run: |
           python3 << 'EOF'
           import json
@@ -155,33 +156,46 @@ jobs:
           videos_data = json.loads('''${{ steps.fetch_modify_data.outputs.videos_data }}''')
           playlist_data = json.loads('''${{ steps.fetch_modify_data.outputs.playlist_data }}''')
           
-          # Write the commands to a file that GitHub Actions can read
-          with open(os.environ['GITHUB_ENV'], 'a') as f:
-              for idx, video in enumerate(videos_data):
-                  properties = json.dumps(video)
-                  relations = json.dumps({"belongs_to_playlist": playlist_data["playlistId"]})
-                  
-                  print(f"VIDEO_{idx}_ID={video['videoId']}", file=f)
-                  print(f"VIDEO_{idx}_PROPS={properties}", file=f)
-                  print(f"VIDEO_{idx}_RELS={relations}", file=f)
+          # Process each video
+          for idx, video in enumerate(videos_data):
+              video_id = video['videoId']
+              properties = json.dumps(video)
+              relations = json.dumps({"belongs_to_playlist": playlist_data["playlistId"]})
+              
+              # Write to output
+              with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
+                  print(f"video_{idx}_id={video_id}", file=f)
+                  print(f"video_{idx}_properties<<EOF_{idx}", file=f)
+                  print(properties, file=f)
+                  print(f"EOF_{idx}", file=f)
+                  print(f"video_{idx}_relations<<REL_{idx}", file=f)
+                  print(relations, file=f)
+                  print(f"REL_{idx}", file=f)
           
-          # Write the count of videos
-          with open(os.environ['GITHUB_ENV'], 'a') as f:
-              print(f"VIDEO_COUNT={len(videos_data)}", file=f)
+          # Write total count
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
+              print(f"video_count={len(videos_data)}", file=f)
           EOF
 
       - name: Create Videos in Port
         if: steps.fetch_modify_data.outputs.videos_data != ''
-        uses: port-labs/port-github-action@v1
-        strategy:
-          matrix:
-            video: ${{ fromJson(format('[{0}]', join(range(env.VIDEO_COUNT), ','))) }}
-        with:
-          clientId: ${{ secrets.PORT_CLIENT_ID }}
-          clientSecret: ${{ secrets.PORT_CLIENT_SECRET }}
-          baseUrl: https://api.getport.io
-          operation: UPSERT
-          identifier: ${{ env.format('VIDEO_{0}_ID', matrix.video) }}
-          blueprint: video
-          properties: ${{ env.format('VIDEO_{0}_PROPS', matrix.video) }}
-          relations: ${{ env.format('VIDEO_{0}_RELS', matrix.video) }}
+        run: |
+          count=${{ steps.process_videos.outputs.video_count }}
+          
+          for i in $(seq 0 $(($count - 1))); do
+            video_id=$(eval echo "\${{ steps.process_videos.outputs.video_${i}_id }}")
+            video_properties=$(eval echo "\${{ steps.process_videos.outputs.video_${i}_properties }}")
+            video_relations=$(eval echo "\${{ steps.process_videos.outputs.video_${i}_relations }}")
+            
+            echo "Creating video $video_id"
+            
+            port-github-action \
+              --client-id "$PORT_CLIENT_ID" \
+              --client-secret "$PORT_CLIENT_SECRET" \
+              --base-url "https://api.getport.io" \
+              --operation "UPSERT" \
+              --identifier "$video_id" \
+              --blueprint "video" \
+              --properties "$video_properties" \
+              --relations "$video_relations"
+          done
