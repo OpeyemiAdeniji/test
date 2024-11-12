@@ -33,6 +33,8 @@ jobs:
           PORT_CLIENT_ID: ${{ secrets.PORT_CLIENT_ID }}
           PORT_CLIENT_SECRET: ${{ secrets.PORT_CLIENT_SECRET }}
         run: |
+          set -x  # Enable command tracing for debugging
+
           # Function to get Port access token
           get_port_access_token() {
             response=$(curl -s -X POST "https://api.getport.io/v1/auth/access_token" \
@@ -41,11 +43,16 @@ jobs:
                 "clientId": "'"$PORT_CLIENT_ID"'",
                 "clientSecret": "'"$PORT_CLIENT_SECRET"'"
               }')
-            echo $response | jq -r '.accessToken'
+            echo "Token response: $response"  # Debug line to print full response
+            echo $response | jq -r '.accessToken // empty'
           }
 
           # Get access token
           ACCESS_TOKEN=$(get_port_access_token)
+          if [[ -z "$ACCESS_TOKEN" ]]; then
+            echo "Failed to retrieve access token. Response: $response"
+            exit 1
+          fi
           echo "Access token obtained: ${ACCESS_TOKEN:0:5}***"
 
           # Fetch playlist details
