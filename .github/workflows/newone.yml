@@ -40,9 +40,18 @@ jobs:
           import json
           from datetime import datetime
 
-          # Constants
+          # Constants and setup
           YOUTUBE_API_KEY = os.environ['YOUTUBE_API_KEY']
           playlist_id = os.environ['PLAYLIST_ID']
+          PORT_CLIENT_ID = os.environ['PORT_CLIENT_ID']
+          PORT_CLIENT_SECRET = os.environ['PORT_CLIENT_SECRET']
+          API_URL = 'https://api.getport.io/v1'
+
+          def get_port_token():
+              credentials = {'clientId': PORT_CLIENT_ID, 'clientSecret': PORT_CLIENT_SECRET}
+              token_response = requests.post(f'{API_URL}/auth/access_token', json=credentials)
+              token_response.raise_for_status()
+              return token_response.json()['accessToken']
 
           def fetch_playlist_details(playlist_id):
               url = f'https://www.googleapis.com/youtube/v3/playlists?part=snippet,contentDetails,status&id={playlist_id}&key={YOUTUBE_API_KEY}'
@@ -76,124 +85,81 @@ jobs:
 
           def sanitize_value(value):
               if isinstance(value, str):
-                  # Replace newlines with spaces and escape special characters
                   return value.replace('\n', ' ').replace('\r', ' ').replace('"', '\\"').strip()
               return value
 
+          # Get Port access token
+          access_token = get_port_token()
+          headers = {'Authorization': f'Bearer {access_token}'}
+
           # Fetch playlist details
           playlist = fetch_playlist_details(playlist_id)
+
+          # Create playlist in Port
           playlist_data = {
-              "playlistId": playlist['id'],
-              "title": sanitize_value(playlist['snippet']['title']),
-              "description": sanitize_value(playlist['snippet']['description']),
-              "thumbnailUrl": playlist['snippet']['thumbnails']['default']['url'],
-              "videoCount": playlist['contentDetails']['itemCount'],
-              "created_at": playlist['snippet']['publishedAt']
+              'identifier': playlist['id'],
+              'title': sanitize_value(playlist['snippet']['title']),
+              'properties': {
+                  'playlistId': playlist['id'],
+                  'title': sanitize_value(playlist['snippet']['title']),
+                  'description': sanitize_value(playlist['snippet']['description']),
+                  'thumbnailUrl': playlist['snippet']['thumbnails']['default']['url'],
+                  'videoCount': playlist['contentDetails']['itemCount'],
+                  'created_at': playlist['snippet']['publishedAt']
+              }
           }
 
-          # Write playlist data to GITHUB_OUTPUT using the new multiline syntax
-          with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as fh:
-              for key, value in playlist_data.items():
-                  if isinstance(value, str):
-                      print(f"playlist_{key}<<EOF", file=fh)
-                      print(f"{value}", file=fh)
-                      print("EOF", file=fh)
-                  else:
-                      print(f"playlist_{key}={value}", file=fh)
+          response = requests.post(
+              f'{API_URL}/blueprints/playlist/entities',
+              json=playlist_data,
+              headers=headers
+          )
+          response.raise_for_status()
 
-          # Fetch videos
+          # Fetch and upload videos
           videos = fetch_playlist_videos(playlist_id)
-
-          # Create a port videos upload script
-          with open('port_upload_videos.py', 'w', encoding='utf-8') as f:
-              f.write("""
-import os
-import json
-import subprocess
-
-def run_port_command(identifier, properties, relations):
-    cmd = [
-        'port-github-action', 'upsert',
-        '--client-id', os.environ['PORT_CLIENT_ID'],
-        '--client-secret', os.environ['PORT_CLIENT_SECRET'],
-        '--base-url', 'https://api.getport.io',
-        '--blueprint', 'video',
-        '--identifier', identifier,
-        '--properties', json.dumps(properties),
-        '--relations', json.dumps(relations)
-    ]
-    subprocess.run(cmd, check=True)
-
-videos = []
-""")
-              # Write video data as Python objects
-              for video in videos:
-                  snippet = video['snippet']
-                  statistics = video.get('statistics', {})
-                  content_details = video.get('contentDetails', {})
-                  
-                  video_data = {
-                      'identifier': video['id'],
-                      'properties': {
-                          "videoId": video['id'],
-                          "title": sanitize_value(snippet['title']),
-                          "description": sanitize_value(snippet['description']),
-                          "thumbnailUrl": snippet['thumbnails']['default']['url'],
-                          "duration": content_details.get('duration', ''),
-                          "viewCount": int(statistics.get('viewCount', 0)),
-                          "likeCount": int(statistics.get('likeCount', 0)),
-                          "commentCount": int(statistics.get('commentCount', 0))
-                      },
-                      'relations': {
-                          "belongs_to_playlist": playlist['id']
-                      }
-                  }
-                  f.write(f"\nvideos.append({repr(video_data)})")
-              
-              # Write the execution code
-              f.write("""
-\n\nfor video in videos:
-    run_port_command(
-        video['identifier'],
-        video['properties'],
-        video['relations']
-    )
-""")
           
-          # Write video count to GITHUB_OUTPUT
-          with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as fh:
-              print(f"video_count={len(videos)}", file=fh)
+          for video in videos:
+              snippet = video['snippet']
+              statistics = video.get('statistics', {})
+              content_details = video.get('contentDetails', {})
+              
+              video_data = {
+                  'identifier': video['id'],
+                  'title': sanitize_value(snippet['title']),
+                  'properties': {
+                      'videoId': video['id'],
+                      'title': sanitize_value(snippet['title']),
+                      'description': sanitize_value(snippet['description']),
+                      'thumbnailUrl': snippet['thumbnails']['default']['url'],
+                      'duration': content_details.get('duration', ''),
+                      'viewCount': int(statistics.get('viewCount', 0)),
+                      'likeCount': int(statistics.get('likeCount', 0)),
+                      'commentCount': int(statistics.get('commentCount', 0))
+                  },
+                  'relations': {
+                      'belongs_to_playlist': playlist['id']
+                  }
+              }
+              
+              response = requests.post(
+                  f'{API_URL}/blueprints/video/entities',
+                  json=video_data,
+                  headers=headers
+              )
+              response.raise_for_status()
+
+          # Write completion status to GITHUB_OUTPUT
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as fh:
+              print(f"upload_complete=true", file=fh)
+              print(f"playlist_id={playlist['id']}", file=fh)
           EOF
 
-      - name: Fetch and Modify YouTube Playlist Data
-        id: fetch_modify_data
+      - name: Fetch and Process YouTube Data
+        id: fetch_data
         env:
           YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
           PLAYLIST_ID: ${{ inputs.playlistid }}
-        run: python fetch_youtube.py
-
-      - name: Create Playlist in Port
-        uses: port-labs/port-github-action@v1
-        with:
-          clientId: ${{ secrets.PORT_CLIENT_ID }}
-          clientSecret: ${{ secrets.PORT_CLIENT_SECRET }}
-          baseUrl: https://api.getport.io
-          operation: UPSERT
-          identifier: ${{ steps.fetch_modify_data.outputs.playlist_playlistId }}
-          blueprint: playlist
-          properties: |-
-            {
-              "playlistId": "${{ steps.fetch_modify_data.outputs.playlist_playlistId }}",
-              "title": "${{ steps.fetch_modify_data.outputs.playlist_title }}",
-              "description": "${{ steps.fetch_modify_data.outputs.playlist_description }}",
-              "thumbnailUrl": "${{ steps.fetch_modify_data.outputs.playlist_thumbnailUrl }}",
-              "videoCount": ${{ steps.fetch_modify_data.outputs.playlist_videoCount }},
-              "created_at": "${{ steps.fetch_modify_data.outputs.playlist_created_at }}"
-            }
-
-      - name: Upload Videos to Port
-        if: steps.fetch_modify_data.outputs.video_count > 0
-        env:
           PORT_CLIENT_ID: ${{ secrets.PORT_CLIENT_ID }}
           PORT_CLIENT_SECRET: ${{ secrets.PORT_CLIENT_SECRET }}
-        run: python port_upload_videos.py
+        run: python fetch_youtube.py
