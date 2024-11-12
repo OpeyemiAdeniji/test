@@ -1,5 +1,4 @@
 name: Update Port with YouTube Playlist Data
-
 on:
   workflow_dispatch:
     inputs:
@@ -31,102 +30,61 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install requests google-api-python-client isodate
+          pip install requests
 
-      - name: Create Python script
+      # Previous steps remain the same until the Upsert Video Data step
+
+      - name: Create Python script for video upsertion
         run: |
-          cat << 'EOF' > fetch_youtube.py
-          # Copy the updated Python script content here
+          cat << 'EOF' > upsert_videos.py
+          import os
+          import json
+
+          video_count = int(os.environ['VIDEO_COUNT'])
+          
+          for i in range(video_count):
+              video_data = {
+                  "identifier": os.environ[f'VIDEOID_{i}'],
+                  "properties": {
+                      "videoId": os.environ[f'VIDEOID_{i}'],
+                      "title": os.environ[f'TITLE_{i}'],
+                      "description": os.environ[f'DESCRIPTION_{i}'],
+                      "thumbnailUrl": os.environ[f'THUMBNAILURL_{i}'],
+                      "duration": os.environ[f'DURATION_{i}'],
+                      "viewCount": int(os.environ[f'VIEWCOUNT_{i}']),
+                      "likeCount": int(os.environ[f'LIKECOUNT_{i}']),
+                      "commentCount": int(os.environ[f'COMMENTCOUNT_{i}'])
+                  },
+                  "relations": {
+                      "belongs_to_playlist": os.environ['PLAYLIST_ID']
+                  }
+              }
+              
+              # Write each video's data to a separate file
+              with open(f'video_data_{i}.json', 'w') as f:
+                  json.dump(video_data, f)
+          
+          # Write the count to GITHUB_OUTPUT
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
+              print(f"video_count={video_count}", file=f)
           EOF
 
-      - name: Fetch and Modify YouTube Playlist Data
-        id: fetch_modify_data
+      - name: Prepare Video Data
+        id: prepare_videos
         env:
-          YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
-          PORT_CLIENT_ID: ${{ secrets.PORT_CLIENT_ID }}
-          PORT_CLIENT_SECRET: ${{ secrets.PORT_CLIENT_SECRET }}
-          PLAYLIST_ID: ${{ inputs.playlistid }}
-        run: python fetch_youtube.py
+          VIDEO_COUNT: ${{ steps.fetch_modify_data.outputs.video_count }}
+          PLAYLIST_ID: ${{ steps.fetch_modify_data.outputs.playlist_playlistId }}
+          # Dynamic environment variables will be available from fetch_youtube.py outputs
+        run: python upsert_videos.py
 
-      - name: Print Outputs for Debugging
+      - name: Upsert Videos to Port
         run: |
-          echo "playlistId: ${{ steps.fetch_modify_data.outputs.playlist_playlistId }}"
-          echo "title: ${{ steps.fetch_modify_data.outputs.playlist_title }}"
-          echo "description: ${{ steps.fetch_modify_data.outputs.playlist_description }}"
-          echo "thumbnailUrl: ${{ steps.fetch_modify_data.outputs.playlist_thumbnailUrl }}"
-          echo "videoCount: ${{ steps.fetch_modify_data.outputs.playlist_videoCount }}"
-          echo "created_at: ${{ steps.fetch_modify_data.outputs.playlist_created_at }}"
-
-      - name: Create Playlist in Port
-        uses: port-labs/port-github-action@v1
-        with:
-          clientId: ${{ secrets.PORT_CLIENT_ID }}
-          clientSecret: ${{ secrets.PORT_CLIENT_SECRET }}
-          baseUrl: https://api.getport.io
-          operation: UPSERT
-          identifier: ${{ steps.fetch_modify_data.outputs.playlist_playlistId }}
-          blueprint: playlist
-          properties: |-
-            {
-              "playlistId": "${{ steps.fetch_modify_data.outputs.playlist_playlistId }}",
-              "title": "${{ steps.fetch_modify_data.outputs.playlist_title }}",
-              "description": "${{ steps.fetch_modify_data.outputs.playlist_description }}",
-              "thumbnailUrl": "${{ steps.fetch_modify_data.outputs.playlist_thumbnailUrl }}",
-              "videoCount": ${{ steps.fetch_modify_data.outputs.playlist_videoCount || 0 }},
-              "created_at": "${{ steps.fetch_modify_data.outputs.playlist_created_at }}"
-            }
-
-      - name: Upsert Video Data into Port
-        if: steps.fetch_modify_data.outputs.video_count > 0
-        run: |
-          VIDEO_COUNT=${{ steps.fetch_modify_data.outputs.video_count }}
-          for ((i=0; i<VIDEO_COUNT; i++));
-          do
-            echo "Processing video $i"
-            VIDEO_ID=$(cat $GITHUB_OUTPUT | grep -E "^videoId_$i=" | cut -d'=' -f2)
-            TITLE=$(cat $GITHUB_OUTPUT | grep -E "^title_$i=" | cut -d'=' -f2)
-            DESCRIPTION=$(cat $GITHUB_OUTPUT | grep -E "^description_$i=" | cut -d'=' -f2)
-            THUMBNAIL_URL=$(cat $GITHUB_OUTPUT | grep -E "^thumbnailUrl_$i=" | cut -d'=' -f2)
-            DURATION=$(cat $GITHUB_OUTPUT | grep -E "^duration_$i=" | cut -d'=' -f2)
-            VIEW_COUNT=$(cat $GITHUB_OUTPUT | grep -E "^viewCount_$i=" | cut -d'=' -f2)
-            LIKE_COUNT=$(cat $GITHUB_OUTPUT | grep -E "^likeCount_$i=" | cut -d'=' -f2)
-            COMMENT_COUNT=$(cat $GITHUB_OUTPUT | grep -E "^commentCount_$i=" | cut -d'=' -f2)
-
-            # Debug prints
-            echo "VIDEO_ID: $VIDEO_ID"
-            echo "TITLE: $TITLE"
-            echo "DESCRIPTION: $DESCRIPTION"
-            echo "THUMBNAIL_URL: $THUMBNAIL_URL"
-            echo "DURATION: $DURATION"
-            echo "VIEW_COUNT: $VIEW_COUNT"
-            echo "LIKE_COUNT: $LIKE_COUNT"
-            echo "COMMENT_COUNT: $COMMENT_COUNT"
-
-            if [ -n "$VIDEO_ID" ]; then
-              curl -X POST -H "Content-Type: application/json" -d '{
-                "clientId": "'"${{ secrets.PORT_CLIENT_ID }}"'",
-                "clientSecret": "'"${{ secrets.PORT_CLIENT_SECRET }}"'",
-                "baseUrl": "https://api.getport.io",
-                "operation": "UPSERT",
-                "identifier": "'"$VIDEO_ID"'",
-                "blueprint": "video",
-                "properties": {
-                  "videoId": "'"$VIDEO_ID"'",
-                  "title": "'"$TITLE"'",
-                  "description": "'"$DESCRIPTION"'",
-                  "thumbnailUrl": "'"$THUMBNAIL_URL"'",
-                  "duration": "'"$DURATION"'",
-                  "viewCount": '"$VIEW_COUNT"',
-                  "likeCount": '"$LIKE_COUNT"',
-                  "commentCount": '"$COMMENT_COUNT"'
-                },
-                "relations": {
-                  "belongs_to_playlist": "'"${{ steps.fetch_modify_data.outputs.playlist_playlistId }}"'"
-                }
-              }' https://api.getport.io/api/upsert
-            else
-              echo "Skipping video $i due to missing VIDEO_ID"
-            fi
+          for i in $(seq 0 $((${{ steps.prepare_videos.outputs.video_count }} - 1))); do
+            echo "Upserting video $i"
+            curl -X POST "https://api.getport.io/v1/blueprints/video/entities?upsert=true" \
+              -H "Content-Type: application/json" \
+              -H "Authorization: Bearer ${{ env.PORT_ACCESS_TOKEN }}" \
+              --data-binary "@video_data_$i.json"
           done
         env:
-          PORT_BASE_URL: https://api.getport.io
+          PORT_ACCESS_TOKEN: ${{ secrets.PORT_CLIENT_SECRET }}
