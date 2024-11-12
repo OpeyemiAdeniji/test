@@ -76,7 +76,6 @@ jobs:
 
           def sanitize_value(value):
               if isinstance(value, str):
-                  # Replace newlines with spaces and escape special characters
                   return value.replace('\n', ' ').replace('\r', ' ').replace('"', '\\"').strip()
               return value
 
@@ -161,26 +160,24 @@ jobs:
 
       - name: Upsert Video Data into Port
         if: steps.fetch_modify_data.outputs.video_count > 0
-        uses: port-labs/port-github-action@v1
-        with:
-          clientId: ${{ secrets.PORT_CLIENT_ID }}
-          clientSecret: ${{ secrets.PORT_CLIENT_SECRET }}
-          baseUrl: https://api.getport.io
-          operation: UPSERT
-          identifier: ${{ steps.fetch_modify_data.outputs.videoId_0 }}
-          blueprint: video
-          properties: |-
-            {
-              "videoId": "${{ steps.fetch_modify_data.outputs.videoId_0 }}",
-              "title": "${{ steps.fetch_modify_data.outputs.title_0 }}",
-              "description": "${{ steps.fetch_modify_data.outputs.description_0 }}",
-              "thumbnailUrl": "${{ steps.fetch_modify_data.outputs.thumbnailUrl_0 }}",
-              "duration": "${{ steps.fetch_modify_data.outputs.duration_0 }}",
-              "viewCount": ${{ steps.fetch_modify_data.outputs.viewCount_0 }},
-              "likeCount": ${{ steps.fetch_modify_data.outputs.likeCount_0 }},
-              "commentCount": ${{ steps.fetch_modify_data.outputs.commentCount_0 }}
-            }
-          relations: |-
-            {
-              "belongs_to_playlist": "${{ steps.fetch_modify_data.outputs.playlist_playlistId }}"
-            }
+        run: |
+          for i in $(seq 0 $((steps.fetch_modify_data.outputs.video_count - 1))); do
+            gh api --method POST https://api.getport.io/v1/your-endpoint \
+              -H "Authorization: Bearer ${{ secrets.PORT_CLIENT_SECRET }}" \
+              -H "Content-Type: application/json" \
+              --field identifier="${{ steps.fetch_modify_data.outputs.videoId_${i} }}" \
+              --field blueprint="video" \
+              --field properties='{
+                "videoId": "${{ steps.fetch_modify_data.outputs.videoId_${i} }}",
+                "title": "${{ steps.fetch_modify_data.outputs.title_${i} }}",
+                "description": "${{ steps.fetch_modify_data.outputs.description_${i} }}",
+                "thumbnailUrl": "${{ steps.fetch_modify_data.outputs.thumbnailUrl_${i} }}",
+                "duration": "${{ steps.fetch_modify_data.outputs.duration_${i} }}",
+                "viewCount": ${{ steps.fetch_modify_data.outputs.viewCount_${i} }},
+                "likeCount": ${{ steps.fetch_modify_data.outputs.likeCount_${i} }},
+                "commentCount": ${{ steps.fetch_modify_data.outputs.commentCount_${i} }}
+              }' \
+              --field relations='{
+                "belongs_to_playlist": "${{ steps.fetch_modify_data.outputs.playlist_playlistId }}"
+              }'
+          done
