@@ -38,162 +38,83 @@ jobs:
           import os
           import requests
           import json
-          import sys
-          import re
           from datetime import datetime
 
           # Constants
           YOUTUBE_API_KEY = os.environ['YOUTUBE_API_KEY']
           playlist_id = os.environ['PLAYLIST_ID']
 
-          def sanitize_string(s):
-              """Sanitize string for GitHub Actions output"""
-              if not isinstance(s, str):
-                  s = str(s)
-              s = s.replace('\n', ' ').replace('\r', ' ')
-              s = re.sub(r'\s+', ' ', s)
-              s = s.replace('%', '%25')
-              s = s.replace('\r', '%0D')
-              s = s.replace('\n', '%0A')
-              s = s.replace(':', '%3A')
-              s = s.replace(',', '%2C')
-              return s.strip()
-
-          def format_duration(duration):
-              """Convert YouTube duration format to readable format"""
-              duration = duration.replace('PT', '')
-              hours = '0'
-              minutes = '0'
-              seconds = '0'
-              
-              if 'H' in duration:
-                  hours, duration = duration.split('H')
-              if 'M' in duration:
-                  minutes, duration = duration.split('M')
-              if 'S' in duration:
-                  seconds = duration.replace('S', '')
-                  
-              return f"{hours.zfill(2)}:{minutes.zfill(2)}:{seconds.zfill(2)}"
-
           def fetch_playlist_details(playlist_id):
-              try:
-                  url = f'https://www.googleapis.com/youtube/v3/playlists?part=snippet,contentDetails,status&id={playlist_id}&key={YOUTUBE_API_KEY}'
-                  response = requests.get(url)
-                  response.raise_for_status()
-                  data = response.json()
-                  if not data.get('items'):
-                      raise ValueError(f"No playlist found with ID: {playlist_id}")
-                  return data['items'][0]
-              except requests.exceptions.RequestException as e:
-                  raise Exception(f"Failed to fetch playlist details: {str(e)}")
+              url = f'https://www.googleapis.com/youtube/v3/playlists?part=snippet,contentDetails,status&id={playlist_id}&key={YOUTUBE_API_KEY}'
+              response = requests.get(url)
+              response.raise_for_status()
+              return response.json()['items'][0]
 
           def fetch_video_details(video_id):
-              try:
-                  url = f'https://www.googleapis.com/youtube/v3/videos?part=snippet,contentDetails,statistics&id={video_id}&key={YOUTUBE_API_KEY}'
-                  response = requests.get(url)
-                  response.raise_for_status()
-                  data = response.json()
-                  if not data.get('items'):
-                      raise ValueError(f"No video found with ID: {video_id}")
-                  return data['items'][0]
-              except requests.exceptions.RequestException as e:
-                  raise Exception(f"Failed to fetch video details: {str(e)}")
+              url = f'https://www.googleapis.com/youtube/v3/videos?part=snippet,contentDetails,statistics&id={video_id}&key={YOUTUBE_API_KEY}'
+              response = requests.get(url)
+              response.raise_for_status()
+              return response.json()['items'][0]
 
           def fetch_playlist_videos(playlist_id):
               videos = []
-              next_page_token = None
-              video_data_list = []
-              
-              try:
-                  while True:
-                      url = f'https://www.googleapis.com/youtube/v3/playlistItems?part=snippet&maxResults=50&playlistId={playlist_id}&key={YOUTUBE_API_KEY}'
-                      if next_page_token:
-                          url += f'&pageToken={next_page_token}'
-                      
-                      response = requests.get(url)
-                      response.raise_for_status()
-                      data = response.json()
-                      
-                      for item in data.get('items', []):
-                          try:
-                              video_id = item['snippet']['resourceId']['videoId']
-                              video_details = fetch_video_details(video_id)
-                              videos.append(video_details)
-                              
-                              # Create video data object
-                              snippet = video_details['snippet']
-                              statistics = video_details.get('statistics', {})
-                              content_details = video_details.get('contentDetails', {})
-                              
-                              video_data = {
-                                  "identifier": video_id,
-                                  "title": snippet['title'],
-                                  "properties": {
-                                      "videoId": video_id,
-                                      "title": snippet['title'],
-                                      "description": snippet.get('description', 'No description available'),
-                                      "thumbnailUrl": snippet.get('thumbnails', {}).get('default', {}).get('url', ''),
-                                      "duration": format_duration(content_details.get('duration', 'PT0S')),
-                                      "viewCount": int(statistics.get('viewCount', 0)),
-                                      "likeCount": int(statistics.get('likeCount', 0)),
-                                      "commentCount": int(statistics.get('commentCount', 0))
-                                  },
-                                  "relations": {
-                                      "belongs_to_playlist": [playlist_id]
-                                  }
-                              }
-                              video_data_list.append(video_data)
-                          except Exception as e:
-                              print(f"Warning: Skipping video {video_id}: {str(e)}")
-                              continue
-                      
-                      next_page_token = data.get('nextPageToken')
-                      if not next_page_token:
-                          break
-                          
-                  return videos, video_data_list
-              except Exception as e:
-                  raise Exception(f"Failed to fetch playlist videos: {str(e)}")
+              url = f'https://www.googleapis.com/youtube/v3/playlistItems?part=snippet&maxResults=50&playlistId={playlist_id}&key={YOUTUBE_API_KEY}'
+              while url:
+                  response = requests.get(url)
+                  response.raise_for_status()
+                  data = response.json()
+                  for item in data.get('items', []):
+                      video_id = item['snippet']['resourceId']['videoId']
+                      video_details = fetch_video_details(video_id)
+                      videos.append(video_details)
+                  next_page_token = data.get('nextPageToken')
+                  if next_page_token:
+                      url = f'https://www.googleapis.com/youtube/v3/playlistItems?part=snippet&maxResults=50&pageToken={next_page_token}&playlistId={playlist_id}&key={YOUTUBE_API_KEY}'
+                  else:
+                      url = None
+              return videos
 
-          try:
-              # Fetch playlist details
-              playlist = fetch_playlist_details(playlist_id)
-              playlist_data = {
-                  "identifier": playlist_id,
-                  "title": playlist['snippet']['title'],
-                  "properties": {
-                      "playlistId": playlist['id'],
-                      "title": playlist['snippet']['title'],
-                      "description": playlist['snippet'].get('description', 'No description available'),
-                      "thumbnailUrl": playlist['snippet'].get('thumbnails', {}).get('default', {}).get('url', ''),
-                      "videoCount": playlist['contentDetails']['itemCount'],
-                      "createdAt": playlist['snippet']['publishedAt']
+          # Fetch playlist details
+          playlist = fetch_playlist_details(playlist_id)
+          playlist_data = {
+              "playlistId": playlist['id'],
+              "title": playlist['snippet']['title'],
+              "description": playlist['snippet']['description'],
+              "thumbnailUrl": playlist['snippet']['thumbnails']['default']['url'],
+              "videoCount": playlist['contentDetails']['itemCount'],
+              "created_at": playlist['snippet']['publishedAt']
+          }
+
+          # Write playlist data to GITHUB_OUTPUT
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as fh:
+              for key, value in playlist_data.items():
+                  print(f"playlist_{key}={value}", file=fh)
+
+          # Fetch videos
+          videos = fetch_playlist_videos(playlist_id)
+          
+          # Write video data to GITHUB_OUTPUT
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as fh:
+              for i, video in enumerate(videos):
+                  snippet = video['snippet']
+                  statistics = video.get('statistics', {})
+                  content_details = video.get('contentDetails', {})
+                  
+                  video_data = {
+                      "videoId": video['id'],
+                      "title": snippet['title'],
+                      "description": snippet['description'],
+                      "thumbnailUrl": snippet['thumbnails']['default']['url'],
+                      "duration": content_details.get('duration', ''),
+                      "viewCount": int(statistics.get('viewCount', 0)),
+                      "likeCount": int(statistics.get('likeCount', 0)),
+                      "commentCount": int(statistics.get('commentCount', 0))
                   }
-              }
-
-              # Write playlist data to GITHUB_OUTPUT
-              with open(os.environ['GITHUB_OUTPUT'], 'a') as fh:
-                  for key, value in playlist_data.items():
-                      sanitized_value = sanitize_string(str(value))
-                      print(f"playlist_{key}={sanitized_value}", file=fh)
-
-              # Fetch videos
-              videos, video_data_list = fetch_playlist_videos(playlist_id)
+                  
+                  for key, value in video_data.items():
+                      print(f"{key}_{i}={value}", file=fh)
               
-              # Write video data to GITHUB_OUTPUT
-              with open(os.environ['GITHUB_OUTPUT'], 'a') as fh:
-                  # Write video data list as JSON for UPSERT_MANY
-                  print(f"video_items={json.dumps(video_data_list)}", file=fh)
-                  
-                  # Write video IDs for relations
-                  video_ids = [v["identifier"] for v in video_data_list]
-                  print(f"video_ids={json.dumps(video_ids)}", file=fh)
-                  
-                  print(f"video_count={len(videos)}", file=fh)
-
-          except Exception as e:
-              print(f"Error: {str(e)}", file=sys.stderr)
-              sys.exit(1)
+              print(f"video_count={len(videos)}", file=fh)
           EOF
 
       - name: Fetch and Modify YouTube Playlist Data
@@ -203,17 +124,6 @@ jobs:
           PLAYLIST_ID: ${{ inputs.playlistid }}
         run: python fetch_youtube.py
 
-      - name: Create Video Entities in Port
-        if: steps.fetch_modify_data.outputs.video_count > 0
-        uses: port-labs/port-github-action@v1
-        with:
-          clientId: ${{ secrets.PORT_CLIENT_ID }}
-          clientSecret: ${{ secrets.PORT_CLIENT_SECRET }}
-          baseUrl: https://api.getport.io
-          operation: BULK_UPSERT
-          blueprint: youtube_video
-          entities: ${{ steps.fetch_modify_data.outputs.video_items }}
-
       - name: Create Playlist in Port
         uses: port-labs/port-github-action@v1
         with:
@@ -221,18 +131,40 @@ jobs:
           clientSecret: ${{ secrets.PORT_CLIENT_SECRET }}
           baseUrl: https://api.getport.io
           operation: UPSERT
-          blueprint: youtube_playlist
           identifier: ${{ steps.fetch_modify_data.outputs.playlist_playlistId }}
+          blueprint: playlist
           properties: |-
             {
-              "title": "${{ steps.fetch_modify_data.outputs.playlist_title }}",
               "playlistId": "${{ steps.fetch_modify_data.outputs.playlist_playlistId }}",
+              "title": "${{ steps.fetch_modify_data.outputs.playlist_title }}",
               "description": "${{ steps.fetch_modify_data.outputs.playlist_description }}",
               "thumbnailUrl": "${{ steps.fetch_modify_data.outputs.playlist_thumbnailUrl }}",
               "videoCount": ${{ steps.fetch_modify_data.outputs.playlist_videoCount }},
-              "createdAt": "${{ steps.fetch_modify_data.outputs.playlist_created_at }}"
+              "created_at": "${{ steps.fetch_modify_data.outputs.playlist_created_at }}"
+            }
+
+      - name: Upsert Video Data into Port
+        if: steps.fetch_modify_data.outputs.video_count > 0
+        uses: port-labs/port-github-action@v1
+        with:
+          clientId: ${{ secrets.PORT_CLIENT_ID }}
+          clientSecret: ${{ secrets.PORT_CLIENT_SECRET }}
+          baseUrl: https://api.getport.io
+          operation: UPSERT
+          identifier: ${{ steps.fetch_modify_data.outputs.videoId_0 }}
+          blueprint: video
+          properties: |-
+            {
+              "videoId": "${{ steps.fetch_modify_data.outputs.videoId_0 }}",
+              "title": "${{ steps.fetch_modify_data.outputs.title_0 }}",
+              "description": "${{ steps.fetch_modify_data.outputs.description_0 }}",
+              "thumbnailUrl": "${{ steps.fetch_modify_data.outputs.thumbnailUrl_0 }}",
+              "duration": "${{ steps.fetch_modify_data.outputs.duration_0 }}",
+              "viewCount": ${{ steps.fetch_modify_data.outputs.viewCount_0 }},
+              "likeCount": ${{ steps.fetch_modify_data.outputs.likeCount_0 }},
+              "commentCount": ${{ steps.fetch_modify_data.outputs.commentCount_0 }}
             }
           relations: |-
             {
-              "has_videos": ${{ steps.fetch_modify_data.outputs.video_ids }}
+              "belongs_to_playlist": "${{ steps.fetch_modify_data.outputs.playlist_playlistId }}"
             }
