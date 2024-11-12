@@ -111,6 +111,7 @@ jobs:
                               
                               video_data = {
                                   "identifier": video_id,
+                                  "title": snippet['title'],
                                   "properties": {
                                       "videoId": video_id,
                                       "title": snippet['title'],
@@ -186,9 +187,9 @@ jobs:
           clientId: ${{ secrets.PORT_CLIENT_ID }}
           clientSecret: ${{ secrets.PORT_CLIENT_SECRET }}
           baseUrl: https://api.getport.io
-          operation: UPSERT
+          operation: BULK_UPSERT
           blueprint: video
-          items: ${{ steps.fetch_modify_data.outputs.video_items }}
+          entities: ${{ steps.fetch_modify_data.outputs.video_items }}
 
       - name: Create Playlist in Port
         uses: port-labs/port-github-action@v1
@@ -197,8 +198,8 @@ jobs:
           clientSecret: ${{ secrets.PORT_CLIENT_SECRET }}
           baseUrl: https://api.getport.io
           operation: UPSERT
-          identifier: ${{ steps.fetch_modify_data.outputs.playlist_playlistId }}
           blueprint: playlist
+          identifier: ${{ steps.fetch_modify_data.outputs.playlist_playlistId }}
           properties: |-
             {
               "playlistId": "${{ steps.fetch_modify_data.outputs.playlist_playlistId }}",
