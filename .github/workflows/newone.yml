@@ -33,9 +33,6 @@ jobs:
           pip install requests
 
       - name: Create Python script
-        env:
-          PORT_CLIENT: ${{ secrets.PORT_CLIENT_ID }}
-          PORT_CLIENT_SECRET: ${{ secrets.PORT_CLIENT_SECRET }}
         run: |
           cat << 'EOF' > fetch_youtube.py
           import os
@@ -45,94 +42,89 @@ jobs:
 
           # Constants and setup
           YOUTUBE_API_KEY = os.environ['YOUTUBE_API_KEY']
-          print('youtube_api',YOUTUBE_API_KEY)
+          print('YOUTUBE_API_KEY:', '***' if YOUTUBE_API_KEY else 'Missing')
           playlist_id = os.environ['PLAYLIST_ID']
-          print('playlis_id',playlist_id)
+          print('PLAYLIST_ID:', playlist_id)
           PORT_CLIENT_ID = os.environ['PORT_CLIENT_ID']
-          print('portclient',PORT_CLIENT_ID)
+          print('PORT_CLIENT_ID:', repr(PORT_CLIENT_ID))
           PORT_CLIENT_SECRET = os.environ['PORT_CLIENT_SECRET']
-          print('porst_client_secrte',PORT_CLIENT_SECRET)
+          print('PORT_CLIENT_SECRET:', repr(PORT_CLIENT_SECRET))
           API_URL = 'https://api.getport.io/v1'
 
-          print(playlist_id)
-          print()
-          
           credentials = {
-              'clientId': PORT_CLIENT_ID,
-              'clientSecret': PORT_CLIENT_SECRET
-                }
+              'clientId': PORT_CLIENT_ID.strip(),
+              'clientSecret': PORT_CLIENT_SECRET.strip()
+          }
 
-          print(credentials)
+          print("Credentials payload:", json.dumps(credentials))
 
           def fetch_playlist_details(playlist_id):
               url = f'https://www.googleapis.com/youtube/v3/playlists?part=snippet,contentDetails,status&id={playlist_id}&key={YOUTUBE_API_KEY}'
               response = requests.get(url)
+              print("Playlist details response status:", response.status_code)
+              print("Playlist details response content:", response.content)
               response.raise_for_status()
               return response.json()['items'][0]
 
           def fetch_video_details(video_id):
               url = f'https://www.googleapis.com/youtube/v3/videos?part=snippet,contentDetails,statistics&id={video_id}&key={YOUTUBE_API_KEY}'
               response = requests.get(url)
+              print(f"Video {video_id} details response status:", response.status_code)
               response.raise_for_status()
               return response.json()['items'][0]
 
-          def fetch_playlist_videos(playlist_id):
-              videos = []
-              url = f'https://www.googleapis.com/youtube/v3/playlistItems?part=snippet&maxResults=50&playlistId={playlist_id}&key={YOUTUBE_API_KEY}'
-              while url:
-                  response = requests.get(url)
-                  response.raise_for_status()
-                  data = response.json()
-                  for item in data.get('items', []):
-                      video_id = item['snippet']['resourceId']['videoId']
-                      video_details = fetch_video_details(video_id)
-                      videos.append(video_details)
-                  next_page_token = data.get('nextPageToken')
-                  if next_page_token:
-                      url = f'https://www.googleapis.com/youtube/v3/playlistItems?part=snippet&maxResults=50&pageToken={next_page_token}&playlistId={playlist_id}&key={YOUTUBE_API_KEY}'
-                  else:
-                      url = None
-              return videos
-
-          def sanitize_value(value):
-              if isinstance(value, str):
-                  return value.replace('\n', ' ').replace('\r', ' ').replace('"', '\\"').strip()
-              return value
-
           # Get Port access token
-
           token_response = requests.post(f'{API_URL}/auth/access_token', json=credentials)
-          print(token_response)
-          access_token = token_response.json().get('accessToken')
-          print(f'Access token - {access_token}')
+          print("Token request response status:", token_response.status_code)
+          print("Token request response content:", token_response.content)
+
+          if token_response.status_code != 200:
+              print("Failed to obtain access token. Check client credentials and endpoint.")
+          else:
+              access_token = token_response.json().get('accessToken')
+              print(f'Access token: {"Obtained" if access_token else "None"}')
 
           headers = {
-                'Authorization': f'Bearer {access_token}'
-            }
+              'Authorization': f'Bearer {access_token}' if access_token else 'Bearer <missing>'
+          }
+
+          # Check if access token retrieval was successful
+          if not access_token:
+              print("Exiting script due to missing access token.")
+              exit(1)
 
           # Fetch playlist details
-          playlist = fetch_playlist_details(playlist_id)
+          try:
+              playlist = fetch_playlist_details(playlist_id)
+          except Exception as e:
+              print(f"Error fetching playlist details: {e}")
+              exit(1)
 
           # Create playlist in Port
           playlist_entity = {
               'identifier': playlist['id'],
-              'title': sanitize_value(playlist['snippet']['title']),
+              'title': playlist['snippet']['title'],
               'properties': {
                   'playlistId': playlist['id'],
-                  'title': sanitize_value(playlist['snippet']['title']),
-                  'description': sanitize_value(playlist['snippet']['description']),
+                  'title': playlist['snippet']['title'],
+                  'description': playlist['snippet']['description'],
                   'thumbnailUrl': playlist['snippet']['thumbnails']['default']['url'],
                   'videoCount': playlist['contentDetails']['itemCount'],
                   'created_at': playlist['snippet']['publishedAt']
               }
           }
 
-          playlist_response = requests.post(f'{API_URL}/blueprints/playlist/entities?upsert=true',json=playlist_entity,headers=headers)
+          playlist_response = requests.post(f'{API_URL}/blueprints/playlist/entities?upsert=true', json=playlist_entity, headers=headers)
           print(f"Playlist sync status: {playlist_response.status_code}")
+          print("Playlist sync response content:", playlist_response.content)
 
           # Fetch and upload videos
-          videos = fetch_playlist_videos(playlist_id)
-          
+          try:
+              videos = fetch_playlist_videos(playlist_id)
+          except Exception as e:
+              print(f"Error fetching playlist videos: {e}")
+              exit(1)
+
           for video in videos:
               snippet = video['snippet']
               statistics = video.get('statistics', {})
@@ -140,11 +132,11 @@ jobs:
               
               video_entity = {
                   'identifier': video['id'],
-                  'title': sanitize_value(snippet['title']),
+                  'title': snippet['title'],
                   'properties': {
                       'videoId': video['id'],
-                      'title': sanitize_value(snippet['title']),
-                      'description': sanitize_value(snippet['description']),
+                      'title': snippet['title'],
+                      'description': snippet['description'],
                       'thumbnailUrl': snippet['thumbnails']['default']['url'],
                       'duration': content_details.get('duration', ''),
                       'viewCount': int(statistics.get('viewCount', 0)),
@@ -156,9 +148,9 @@ jobs:
                   }
               }
               
-              video_response = requests.post(f'{API_URL}/blueprints/video/entities?upsert=true',json=video_entity,headers=headers)
-              print(f"video sync status: {video_response.status_code}")
-
+              video_response = requests.post(f'{API_URL}/blueprints/video/entities?upsert=true', json=video_entity, headers=headers)
+              print(f"Video {video['id']} sync status: {video_response.status_code}")
+              print("Video sync response content:", video_response.content)
           EOF
 
       - name: Fetch and Process YouTube Data
