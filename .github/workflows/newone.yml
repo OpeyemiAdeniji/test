@@ -106,6 +106,7 @@ jobs:
           # Write video data to GITHUB_OUTPUT
           with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as fh:
               for i, video in enumerate(videos):
+                  print(f"Outputting data for video index {i}")  # Debug print
                   snippet = video['snippet']
                   statistics = video.get('statistics', {})
                   content_details = video.get('contentDetails', {})
@@ -139,6 +140,9 @@ jobs:
           PLAYLIST_ID: ${{ inputs.playlistid }}
         run: python fetch_youtube.py
 
+      - name: Print Outputs for Debugging
+        run: cat $GITHUB_OUTPUT
+
       - name: Create Playlist in Port
         uses: port-labs/port-github-action@v1
         with:
@@ -162,20 +166,21 @@ jobs:
         if: steps.fetch_modify_data.outputs.video_count > 0
         run: |
           for i in $(seq 0 $((steps.fetch_modify_data.outputs.video_count - 1))); do
+            echo "Upserting video $i"
             gh api --method POST https://api.getport.io/v1/your-endpoint \
               -H "Authorization: Bearer ${{ secrets.PORT_CLIENT_SECRET }}" \
               -H "Content-Type: application/json" \
-              --field identifier="${{ steps.fetch_modify_data.outputs.videoId_${i} }}" \
+              --field identifier="${{ steps.fetch_modify_data.outputs['videoId_'${i}] }}" \
               --field blueprint="video" \
               --field properties='{
-                "videoId": "${{ steps.fetch_modify_data.outputs.videoId_${i} }}",
-                "title": "${{ steps.fetch_modify_data.outputs.title_${i} }}",
-                "description": "${{ steps.fetch_modify_data.outputs.description_${i} }}",
-                "thumbnailUrl": "${{ steps.fetch_modify_data.outputs.thumbnailUrl_${i} }}",
-                "duration": "${{ steps.fetch_modify_data.outputs.duration_${i} }}",
-                "viewCount": ${{ steps.fetch_modify_data.outputs.viewCount_${i} }},
-                "likeCount": ${{ steps.fetch_modify_data.outputs.likeCount_${i} }},
-                "commentCount": ${{ steps.fetch_modify_data.outputs.commentCount_${i} }}
+                "videoId": "${{ steps.fetch_modify_data.outputs['videoId_'${i}] }}",
+                "title": "${{ steps.fetch_modify_data.outputs['title_'${i}] }}",
+                "description": "${{ steps.fetch_modify_data.outputs['description_'${i}] }}",
+                "thumbnailUrl": "${{ steps.fetch_modify_data.outputs['thumbnailUrl_'${i}] }}",
+                "duration": "${{ steps.fetch_modify_data.outputs['duration_'${i}] }}",
+                "viewCount": ${{ steps.fetch_modify_data.outputs['viewCount_'${i}] }},
+                "likeCount": ${{ steps.fetch_modify_data.outputs['likeCount_'${i}] }},
+                "commentCount": ${{ steps.fetch_modify_data.outputs['commentCount_'${i}] }}
               }' \
               --field relations='{
                 "belongs_to_playlist": "${{ steps.fetch_modify_data.outputs.playlist_playlistId }}"
