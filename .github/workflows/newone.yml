@@ -146,7 +146,7 @@ jobs:
               }
               
               video_response = requests.post(f'{API_URL}/blueprints/video/entities?upsert=true',json=video_entity,headers=headers)
-              print(f"Playlist sync status: {video_response.status_code}")
+              print(f"video sync status: {video_response.status_code}")
 
           EOF
 
