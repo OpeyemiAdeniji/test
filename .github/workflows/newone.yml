@@ -159,28 +159,46 @@ jobs:
               "created_at": "${{ steps.fetch_modify_data.outputs.playlist_created_at }}"
             }
 
-      - name: Upsert Video Data into Port
+      - name: Create Video Upload Script
         if: steps.fetch_modify_data.outputs.video_count > 0
-        uses: port-labs/port-github-action@v1
-        with:
-          clientId: ${{ secrets.PORT_CLIENT_ID }}
-          clientSecret: ${{ secrets.PORT_CLIENT_SECRET }}
-          baseUrl: https://api.getport.io
-          operation: UPSERT
-          identifier: ${{ steps.fetch_modify_data.outputs.videoId_0 }}
-          blueprint: video
-          properties: |-
+        run: |
+          cat << 'EOF' > upload_videos.sh
+          #!/bin/bash
+          video_count=${{ steps.fetch_modify_data.outputs.video_count }}
+          for i in $(seq 0 $(($video_count - 1))); do
+            properties=$(cat << 'EEOF'
             {
-              "videoId": "${{ steps.fetch_modify_data.outputs.videoId_0 }}",
-              "title": "${{ steps.fetch_modify_data.outputs.title_0 }}",
-              "description": "${{ steps.fetch_modify_data.outputs.description_0 }}",
-              "thumbnailUrl": "${{ steps.fetch_modify_data.outputs.thumbnailUrl_0 }}",
-              "duration": "${{ steps.fetch_modify_data.outputs.duration_0 }}",
-              "viewCount": ${{ steps.fetch_modify_data.outputs.viewCount_0 }},
-              "likeCount": ${{ steps.fetch_modify_data.outputs.likeCount_0 }},
-              "commentCount": ${{ steps.fetch_modify_data.outputs.commentCount_0 }}
+              "videoId": "${{ steps.fetch_modify_data.outputs.videoId_${i} }}",
+              "title": "${{ steps.fetch_modify_data.outputs.title_${i} }}",
+              "description": "${{ steps.fetch_modify_data.outputs.description_${i} }}",
+              "thumbnailUrl": "${{ steps.fetch_modify_data.outputs.thumbnailUrl_${i} }}",
+              "duration": "${{ steps.fetch_modify_data.outputs.duration_${i} }}",
+              "viewCount": ${{ steps.fetch_modify_data.outputs.viewCount_${i} }},
+              "likeCount": ${{ steps.fetch_modify_data.outputs.likeCount_${i} }},
+              "commentCount": ${{ steps.fetch_modify_data.outputs.commentCount_${i} }}
             }
-          relations: |-
+          EEOF
+            )
+            
+            relations=$(cat << 'EEOF'
             {
               "belongs_to_playlist": "${{ steps.fetch_modify_data.outputs.playlist_playlistId }}"
             }
+          EEOF
+            )
+            
+            port-github-action upsert \
+              --client-id "$PORT_CLIENT_ID" \
+              --client-secret "$PORT_CLIENT_SECRET" \
+              --base-url "https://api.getport.io" \
+              --blueprint "video" \
+              --identifier "${{ steps.fetch_modify_data.outputs.videoId_${i} }}" \
+              --properties "$properties" \
+              --relations "$relations"
+          done
+          EOF
+          chmod +x upload_videos.sh
+
+      - name: Upload Videos to Port
+        if: steps.fetch_modify_data.outputs.video_count > 0
+        run: ./upload_videos.sh
