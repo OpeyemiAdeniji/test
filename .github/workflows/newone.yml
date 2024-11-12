@@ -42,9 +42,13 @@ jobs:
 
           # Constants and setup
           YOUTUBE_API_KEY = os.environ['YOUTUBE_API_KEY']
+          print('youtube_api',YOUTUBE_API_KEY)
           playlist_id = os.environ['PLAYLIST_ID']
+          print('playlis_id',playlist_id)
           PORT_CLIENT_ID = os.environ['PORT_CLIENT_ID']
+          print('portclient',PORT_CLIENT_ID)
           PORT_CLIENT_SECRET = os.environ['PORT_CLIENT_SECRET']
+          print('porst_client_secrte',PORT_CLIENT_SECRET)
           API_URL = 'https://api.getport.io/v1'
 
           print(playlist_id)
