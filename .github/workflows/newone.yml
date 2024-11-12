@@ -104,32 +104,64 @@ jobs:
           # Fetch videos
           videos = fetch_playlist_videos(playlist_id)
 
-          # Write video data to GITHUB_OUTPUT
-          with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as fh:
-              for i, video in enumerate(videos):
+          # Create a port videos upload script
+          with open('port_upload_videos.py', 'w', encoding='utf-8') as f:
+              f.write("""
+import os
+import json
+import subprocess
+
+def run_port_command(identifier, properties, relations):
+    cmd = [
+        'port-github-action', 'upsert',
+        '--client-id', os.environ['PORT_CLIENT_ID'],
+        '--client-secret', os.environ['PORT_CLIENT_SECRET'],
+        '--base-url', 'https://api.getport.io',
+        '--blueprint', 'video',
+        '--identifier', identifier,
+        '--properties', json.dumps(properties),
+        '--relations', json.dumps(relations)
+    ]
+    subprocess.run(cmd, check=True)
+
+videos = []
+""")
+              # Write video data as Python objects
+              for video in videos:
                   snippet = video['snippet']
                   statistics = video.get('statistics', {})
                   content_details = video.get('contentDetails', {})
                   
                   video_data = {
-                      "videoId": video['id'],
-                      "title": sanitize_value(snippet['title']),
-                      "description": sanitize_value(snippet['description']),
-                      "thumbnailUrl": snippet['thumbnails']['default']['url'],
-                      "duration": content_details.get('duration', ''),
-                      "viewCount": int(statistics.get('viewCount', 0)),
-                      "likeCount": int(statistics.get('likeCount', 0)),
-                      "commentCount": int(statistics.get('commentCount', 0))
+                      'identifier': video['id'],
+                      'properties': {
+                          "videoId": video['id'],
+                          "title": sanitize_value(snippet['title']),
+                          "description": sanitize_value(snippet['description']),
+                          "thumbnailUrl": snippet['thumbnails']['default']['url'],
+                          "duration": content_details.get('duration', ''),
+                          "viewCount": int(statistics.get('viewCount', 0)),
+                          "likeCount": int(statistics.get('likeCount', 0)),
+                          "commentCount": int(statistics.get('commentCount', 0))
+                      },
+                      'relations': {
+                          "belongs_to_playlist": playlist['id']
+                      }
                   }
-                  
-                  for key, value in video_data.items():
-                      if isinstance(value, str):
-                          print(f"{key}_{i}<<EOF", file=fh)
-                          print(f"{value}", file=fh)
-                          print("EOF", file=fh)
-                      else:
-                          print(f"{key}_{i}={value}", file=fh)
+                  f.write(f"\nvideos.append({repr(video_data)})")
               
+              # Write the execution code
+              f.write("""
+\n\nfor video in videos:
+    run_port_command(
+        video['identifier'],
+        video['properties'],
+        video['relations']
+    )
+""")
+          
+          # Write video count to GITHUB_OUTPUT
+          with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as fh:
               print(f"video_count={len(videos)}", file=fh)
           EOF
 
@@ -159,46 +191,9 @@ jobs:
               "created_at": "${{ steps.fetch_modify_data.outputs.playlist_created_at }}"
             }
 
-      - name: Create Video Upload Script
-        if: steps.fetch_modify_data.outputs.video_count > 0
-        run: |
-          cat << 'EOF' > upload_videos.sh
-          #!/bin/bash
-          video_count=${{ steps.fetch_modify_data.outputs.video_count }}
-          for i in $(seq 0 $(($video_count - 1))); do
-            properties=$(cat << 'EEOF'
-            {
-              "videoId": "${{ steps.fetch_modify_data.outputs.videoId_${i} }}",
-              "title": "${{ steps.fetch_modify_data.outputs.title_${i} }}",
-              "description": "${{ steps.fetch_modify_data.outputs.description_${i} }}",
-              "thumbnailUrl": "${{ steps.fetch_modify_data.outputs.thumbnailUrl_${i} }}",
-              "duration": "${{ steps.fetch_modify_data.outputs.duration_${i} }}",
-              "viewCount": ${{ steps.fetch_modify_data.outputs.viewCount_${i} }},
-              "likeCount": ${{ steps.fetch_modify_data.outputs.likeCount_${i} }},
-              "commentCount": ${{ steps.fetch_modify_data.outputs.commentCount_${i} }}
-            }
-          EEOF
-            )
-            
-            relations=$(cat << 'EEOF'
-            {
-              "belongs_to_playlist": "${{ steps.fetch_modify_data.outputs.playlist_playlistId }}"
-            }
-          EEOF
-            )
-            
-            port-github-action upsert \
-              --client-id "$PORT_CLIENT_ID" \
-              --client-secret "$PORT_CLIENT_SECRET" \
-              --base-url "https://api.getport.io" \
-              --blueprint "video" \
-              --identifier "${{ steps.fetch_modify_data.outputs.videoId_${i} }}" \
-              --properties "$properties" \
-              --relations "$relations"
-          done
-          EOF
-          chmod +x upload_videos.sh
-
       - name: Upload Videos to Port
         if: steps.fetch_modify_data.outputs.video_count > 0
-        run: ./upload_videos.sh
+        env:
+          PORT_CLIENT_ID: ${{ secrets.PORT_CLIENT_ID }}
+          PORT_CLIENT_SECRET: ${{ secrets.PORT_CLIENT_SECRET }}
+        run: python port_upload_videos.py
