@@ -1,96 +1,186 @@
-import os
-import requests
-import json
-from datetime import datetime
+name: Update Port with YouTube Playlist Data
+on:
+  workflow_dispatch:
+    inputs:
+      playlistid:
+        description: 'ID of the YouTube playlist'
+        required: true
+      port_context:
+        description: 'Port context payload'
+        required: true
 
-# Constants
-YOUTUBE_API_KEY = os.environ['YOUTUBE_API_KEY']
-playlist_id = os.environ['PLAYLIST_ID']
+jobs:
+  update_port:
+    runs-on: ubuntu-latest
+    env:
+      PORT_CLIENT_ID: ${{ secrets.PORT_CLIENT_ID }}
+      PORT_CLIENT_SECRET: ${{ secrets.PORT_CLIENT_SECRET }}
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      PORT_RUN_ID: ${{ fromJson(inputs.port_context).runId }}
 
-def fetch_playlist_details(playlist_id):
-    url = f'https://www.googleapis.com/youtube/v3/playlists?part=snippet,contentDetails,status&id={playlist_id}&key={YOUTUBE_API_KEY}'
-    response = requests.get(url)
-    response.raise_for_status()
-    return response.json()['items'][0]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
 
-def fetch_video_details(video_id):
-    url = f'https://www.googleapis.com/youtube/v3/videos?part=snippet,contentDetails,statistics&id={video_id}&key={YOUTUBE_API_KEY}'
-    response = requests.get(url)
-    response.raise_for_status()
-    return response.json()['items'][0]
+      - name: Set up Python
+        uses: actions/setup-python@v2
+        with:
+          python-version: '3.x'
 
-def fetch_playlist_videos(playlist_id):
-    videos = []
-    url = f'https://www.googleapis.com/youtube/v3/playlistItems?part=snippet&maxResults=50&playlistId={playlist_id}&key={YOUTUBE_API_KEY}'
-    while url:
-        response = requests.get(url)
-        response.raise_for_status()
-        data = response.json()
-        for item in data.get('items', []):
-            video_id = item['snippet']['resourceId']['videoId']
-            video_details = fetch_video_details(video_id)
-            videos.append(video_details)
-        next_page_token = data.get('nextPageToken')
-        if next_page_token:
-            url = f'https://www.googleapis.com/youtube/v3/playlistItems?part=snippet&maxResults=50&pageToken={next_page_token}&playlistId={playlist_id}&key={YOUTUBE_API_KEY}'
-        else:
-            url = None
-    return videos
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install requests
 
-def sanitize_value(value):
-    if isinstance(value, str):
-        # Replace newlines with spaces and escape special characters
-        return value.replace('\n', ' ').replace('\r', ' ').replace('"', '\\"').strip()
-    return value
+      - name: Create Python script
+        run: |
+          cat << 'EOF' > fetch_youtube.py
+          import os
+          import requests
+          import json
+          from datetime import datetime
 
-# Fetch playlist details
-playlist = fetch_playlist_details(playlist_id)
-playlist_data = {
-    "playlistId": playlist['id'],
-    "title": sanitize_value(playlist['snippet']['title']),
-    "description": sanitize_value(playlist['snippet']['description']),
-    "thumbnailUrl": playlist['snippet']['thumbnails']['default']['url'],
-    "videoCount": playlist['contentDetails']['itemCount'],
-    "created_at": playlist['snippet']['publishedAt']
-}
+          # Constants
+          YOUTUBE_API_KEY = os.environ['YOUTUBE_API_KEY']
+          playlist_id = os.environ['PLAYLIST_ID']
 
-# Write playlist data to GITHUB_OUTPUT using the new multiline syntax
-with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as fh:
-    for key, value in playlist_data.items():
-        if isinstance(value, str):
-            print(f"playlist_{key}<<EOF", file=fh)
-            print(f"{value}", file=fh)
-            print("EOF", file=fh)
-        else:
-            print(f"playlist_{key}={value}", file=fh)
+          def fetch_playlist_details(playlist_id):
+              url = f'https://www.googleapis.com/youtube/v3/playlists?part=snippet,contentDetails,status&id={playlist_id}&key={YOUTUBE_API_KEY}'
+              response = requests.get(url)
+              response.raise_for_status()
+              return response.json()['items'][0]
 
-# Fetch videos
-videos = fetch_playlist_videos(playlist_id)
+          def fetch_video_details(video_id):
+              url = f'https://www.googleapis.com/youtube/v3/videos?part=snippet,contentDetails,statistics&id={video_id}&key={YOUTUBE_API_KEY}'
+              response = requests.get(url)
+              response.raise_for_status()
+              return response.json()['items'][0]
 
-# Write video data to GITHUB_OUTPUT
-with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as fh:
-    for i, video in enumerate(videos):
-        snippet = video['snippet']
-        statistics = video.get('statistics', {})
-        content_details = video.get('contentDetails', {})
-        
-        video_data = {
-            "videoId": video['id'],
-            "title": sanitize_value(snippet['title']),
-            "description": sanitize_value(snippet['description']),
-            "thumbnailUrl": snippet['thumbnails']['default']['url'],
-            "duration": content_details.get('duration', ''),
-            "viewCount": int(statistics.get('viewCount', 0)),
-            "likeCount": int(statistics.get('likeCount', 0)),
-            "commentCount": int(statistics.get('commentCount', 0))
-        }
-        
-        for key, value in video_data.items():
-            if isinstance(value, str):
-                print(f"{key}_{i}<<EOF", file=fh)
-                print(f"{value}", file=fh)
-                print("EOF", file=fh)
-            else:
-                print(f"{key}_{i}={value}", file=fh)
-    
-    print(f"video_count={len(videos)}", file=fh)
+          def fetch_playlist_videos(playlist_id):
+              videos = []
+              url = f'https://www.googleapis.com/youtube/v3/playlistItems?part=snippet&maxResults=50&playlistId={playlist_id}&key={YOUTUBE_API_KEY}'
+              while url:
+                  response = requests.get(url)
+                  response.raise_for_status()
+                  data = response.json()
+                  for item in data.get('items', []):
+                      video_id = item['snippet']['resourceId']['videoId']
+                      video_details = fetch_video_details(video_id)
+                      videos.append(video_details)
+                  next_page_token = data.get('nextPageToken')
+                  if next_page_token:
+                      url = f'https://www.googleapis.com/youtube/v3/playlistItems?part=snippet&maxResults=50&pageToken={next_page_token}&playlistId={playlist_id}&key={YOUTUBE_API_KEY}'
+                  else:
+                      url = None
+              return videos
+
+          def sanitize_value(value):
+              if isinstance(value, str):
+                  # Replace newlines with spaces and escape special characters
+                  return value.replace('\n', ' ').replace('\r', ' ').replace('"', '\\"').strip()
+              return value
+
+          # Fetch playlist details
+          playlist = fetch_playlist_details(playlist_id)
+          playlist_data = {
+              "playlistId": playlist['id'],
+              "title": sanitize_value(playlist['snippet']['title']),
+              "description": sanitize_value(playlist['snippet']['description']),
+              "thumbnailUrl": playlist['snippet']['thumbnails']['default']['url'],
+              "videoCount": playlist['contentDetails']['itemCount'],
+              "created_at": playlist['snippet']['publishedAt']
+          }
+
+          # Write playlist data to GITHUB_OUTPUT using the new multiline syntax
+          with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as fh:
+              for key, value in playlist_data.items():
+                  if isinstance(value, str):
+                      print(f"playlist_{key}<<EOF", file=fh)
+                      print(f"{value}", file=fh)
+                      print("EOF", file=fh)
+                  else:
+                      print(f"playlist_{key}={value}", file=fh)
+
+          # Fetch videos
+          videos = fetch_playlist_videos(playlist_id)
+
+          # Write video data to GITHUB_OUTPUT
+          with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as fh:
+              for i, video in enumerate(videos):
+                  snippet = video['snippet']
+                  statistics = video.get('statistics', {})
+                  content_details = video.get('contentDetails', {})
+                  
+                  video_data = {
+                      "videoId": video['id'],
+                      "title": sanitize_value(snippet['title']),
+                      "description": sanitize_value(snippet['description']),
+                      "thumbnailUrl": snippet['thumbnails']['default']['url'],
+                      "duration": content_details.get('duration', ''),
+                      "viewCount": int(statistics.get('viewCount', 0)),
+                      "likeCount": int(statistics.get('likeCount', 0)),
+                      "commentCount": int(statistics.get('commentCount', 0))
+                  }
+                  
+                  for key, value in video_data.items():
+                      if isinstance(value, str):
+                          print(f"{key}_{i}<<EOF", file=fh)
+                          print(f"{value}", file=fh)
+                          print("EOF", file=fh)
+                      else:
+                          print(f"{key}_{i}={value}", file=fh)
+              
+              print(f"video_count={len(videos)}", file=fh)
+          EOF
+
+      - name: Fetch and Modify YouTube Playlist Data
+        id: fetch_modify_data
+        env:
+          YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
+          PLAYLIST_ID: ${{ inputs.playlistid }}
+        run: python fetch_youtube.py
+
+      - name: Create Playlist in Port
+        uses: port-labs/port-github-action@v1
+        with:
+          clientId: ${{ secrets.PORT_CLIENT_ID }}
+          clientSecret: ${{ secrets.PORT_CLIENT_SECRET }}
+          baseUrl: https://api.getport.io
+          operation: UPSERT
+          identifier: ${{ steps.fetch_modify_data.outputs.playlist_playlistId }}
+          blueprint: playlist
+          properties: |-
+            {
+              "playlistId": "${{ steps.fetch_modify_data.outputs.playlist_playlistId }}",
+              "title": "${{ steps.fetch_modify_data.outputs.playlist_title }}",
+              "description": "${{ steps.fetch_modify_data.outputs.playlist_description }}",
+              "thumbnailUrl": "${{ steps.fetch_modify_data.outputs.playlist_thumbnailUrl }}",
+              "videoCount": ${{ steps.fetch_modify_data.outputs.playlist_videoCount }},
+              "created_at": "${{ steps.fetch_modify_data.outputs.playlist_created_at }}"
+            }
+
+      - name: Upsert Video Data into Port
+        if: steps.fetch_modify_data.outputs.video_count > 0
+        uses: port-labs/port-github-action@v1
+        with:
+          clientId: ${{ secrets.PORT_CLIENT_ID }}
+          clientSecret: ${{ secrets.PORT_CLIENT_SECRET }}
+          baseUrl: https://api.getport.io
+          operation: UPSERT
+          identifier: ${{ steps.fetch_modify_data.outputs.videoId_0 }}
+          blueprint: video
+          properties: |-
+            {
+              "videoId": "${{ steps.fetch_modify_data.outputs.videoId_0 }}",
+              "title": "${{ steps.fetch_modify_data.outputs.title_0 }}",
+              "description": "${{ steps.fetch_modify_data.outputs.description_0 }}",
+              "thumbnailUrl": "${{ steps.fetch_modify_data.outputs.thumbnailUrl_0 }}",
+              "duration": "${{ steps.fetch_modify_data.outputs.duration_0 }}",
+              "viewCount": ${{ steps.fetch_modify_data.outputs.viewCount_0 }},
+              "likeCount": ${{ steps.fetch_modify_data.outputs.likeCount_0 }},
+              "commentCount": ${{ steps.fetch_modify_data.outputs.commentCount_0 }}
+            }
+          relations: |-
+            {
+              "belongs_to_playlist": "${{ steps.fetch_modify_data.outputs.playlist_playlistId }}"
+            }
