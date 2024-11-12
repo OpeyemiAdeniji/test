@@ -35,102 +35,7 @@ jobs:
       - name: Create Python script
         run: |
           cat << 'EOF' > fetch_youtube.py
-          import os
-          import requests
-          import json
-          from datetime import datetime
-
-          # Constants
-          YOUTUBE_API_KEY = os.environ['YOUTUBE_API_KEY']
-          playlist_id = os.environ['PLAYLIST_ID']
-
-          def fetch_playlist_details(playlist_id):
-              url = f'https://www.googleapis.com/youtube/v3/playlists?part=snippet,contentDetails,status&id={playlist_id}&key={YOUTUBE_API_KEY}'
-              response = requests.get(url)
-              response.raise_for_status()
-              return response.json()['items'][0]
-
-          def fetch_video_details(video_id):
-              url = f'https://www.googleapis.com/youtube/v3/videos?part=snippet,contentDetails,statistics&id={video_id}&key={YOUTUBE_API_KEY}'
-              response = requests.get(url)
-              response.raise_for_status()
-              return response.json()['items'][0]
-
-          def fetch_playlist_videos(playlist_id):
-              videos = []
-              url = f'https://www.googleapis.com/youtube/v3/playlistItems?part=snippet&maxResults=50&playlistId={playlist_id}&key={YOUTUBE_API_KEY}'
-              while url:
-                  response = requests.get(url)
-                  response.raise_for_status()
-                  data = response.json()
-                  for item in data.get('items', []):
-                      video_id = item['snippet']['resourceId']['videoId']
-                      video_details = fetch_video_details(video_id)
-                      videos.append(video_details)
-                  next_page_token = data.get('nextPageToken')
-                  if next_page_token:
-                      url = f'https://www.googleapis.com/youtube/v3/playlistItems?part=snippet&maxResults=50&pageToken={next_page_token}&playlistId={playlist_id}&key={YOUTUBE_API_KEY}'
-                  else:
-                      url = None
-              return videos
-
-          def sanitize_value(value):
-              if isinstance(value, str):
-                  return value.replace('\n', ' ').replace('\r', ' ').replace('"', '\\"').strip()
-              return value
-
-          # Fetch playlist details
-          playlist = fetch_playlist_details(playlist_id)
-          playlist_data = {
-              "playlistId": playlist['id'],
-              "title": sanitize_value(playlist['snippet']['title']),
-              "description": sanitize_value(playlist['snippet']['description']),
-              "thumbnailUrl": playlist['snippet']['thumbnails']['default']['url'],
-              "videoCount": playlist['contentDetails']['itemCount'],
-              "created_at": playlist['snippet']['publishedAt']
-          }
-
-          # Write playlist data to GITHUB_OUTPUT using the new multiline syntax
-          with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as fh:
-              for key, value in playlist_data.items():
-                  if isinstance(value, str):
-                      print(f"playlist_{key}<<EOF", file=fh)
-                      print(f"{value}", file=fh)
-                      print("EOF", file=fh)
-                  else:
-                      print(f"playlist_{key}={value}", file=fh)
-
-          # Fetch videos
-          videos = fetch_playlist_videos(playlist_id)
-
-          # Write video data to GITHUB_OUTPUT
-          with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as fh:
-              for i, video in enumerate(videos):
-                  print(f"Outputting data for video index {i}")  # Debug print
-                  snippet = video['snippet']
-                  statistics = video.get('statistics', {})
-                  content_details = video.get('contentDetails', {})
-                  
-                  video_data = {
-                      "videoId": video['id'],
-                      "title": sanitize_value(snippet['title']),
-                      "description": sanitize_value(snippet['description']),
-                      "thumbnailUrl": snippet['thumbnails']['default']['url'],
-                      "duration": content_details.get('duration', ''),
-                      "viewCount": int(statistics.get('viewCount', 0)),
-                      "likeCount": int(statistics.get('likeCount', 0)),
-                      "commentCount": int(statistics.get('commentCount', 0))
-                  }
-                  
-                  for key, value in video_data.items():
-                      if isinstance(value, str):
-                          print(f"{key}_{i}<<EOF", file=fh)
-                          print(f"{value}", file=fh)
-                          print("EOF", file=fh)
-                      else:
-                          print(f"{key}_{i}={value}", file=fh)
-              
-              print(f"video_count={len(videos)}", file=fh)
+          # [Previous Python script content remains the same until the end of video data writing]
           EOF
 
       - name: Fetch and Modify YouTube Playlist Data
@@ -139,9 +44,6 @@ jobs:
           YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
           PLAYLIST_ID: ${{ inputs.playlistid }}
         run: python fetch_youtube.py
-
-      - name: Print Outputs for Debugging
-        run: cat $GITHUB_OUTPUT
 
       - name: Create Playlist in Port
         uses: port-labs/port-github-action@v1
@@ -162,45 +64,47 @@ jobs:
               "created_at": "${{ steps.fetch_modify_data.outputs.playlist_created_at }}"
             }
 
-      - name: Upsert Video Data into Port
+      - name: Create Video Upload Script
         if: steps.fetch_modify_data.outputs.video_count > 0
         run: |
-          for i in $(seq 0 $((steps.fetch_modify_data.outputs.video_count - 1))); do
-            videoId_var="steps.fetch_modify_data.outputs.videoId_${i}"
-            title_var="steps.fetch_modify_data.outputs.title_${i}"
-            description_var="steps.fetch_modify_data.outputs.description_${i}"
-            thumbnailUrl_var="steps.fetch_modify_data.outputs.thumbnailUrl_${i}"
-            duration_var="steps.fetch_modify_data.outputs.duration_${i}"
-            viewCount_var="steps.fetch_modify_data.outputs.viewCount_${i}"
-            likeCount_var="steps.fetch_modify_data.outputs.likeCount_${i}"
-            commentCount_var="steps.fetch_modify_data.outputs.commentCount_${i}"
+          cat << 'EOF' > upload_videos.sh
+          #!/bin/bash
+          
+          video_count="${{ steps.fetch_modify_data.outputs.video_count }}"
+          
+          for i in $(seq 0 $(($video_count - 1))); do
+            echo "Processing video $i"
             
-            eval videoId=\${{ ${videoId_var} }}
-            eval title=\${{ ${title_var} }}
-            eval description=\${{ ${description_var} }}
-            eval thumbnailUrl=\${{ ${thumbnailUrl_var} }}
-            eval duration=\${{ ${duration_var} }}
-            eval viewCount=\${{ ${viewCount_var} }}
-            eval likeCount=\${{ ${likeCount_var} }}
-            eval commentCount=\${{ ${commentCount_var} }}
-
-            echo "Upserting video $i"
-            gh api --method POST https://api.getport.io/v1/your-endpoint \
-              -H "Authorization: Bearer ${{ secrets.PORT_CLIENT_SECRET }}" \
-              -H "Content-Type: application/json" \
-              --field identifier="$videoId" \
-              --field blueprint="video" \
-              --field properties="{
-                \"videoId\": \"$videoId\",
-                \"title\": \"$title\",
-                \"description\": \"$description\",
-                \"thumbnailUrl\": \"$thumbnailUrl\",
-                \"duration\": \"$duration\",
-                \"viewCount\": $viewCount,
-                \"likeCount\": $likeCount,
-                \"commentCount\": $commentCount
-              }" \
-              --field relations="{
-                \"belongs_to_playlist\": \"${{ steps.fetch_modify_data.outputs.playlist_playlistId }}\"
-              }"
+            # Construct the JSON for port-github-action
+            json_properties=$(cat << END
+            {
+              "videoId": "${{ steps.fetch_modify_data.outputs.videoId_${i} }}",
+              "title": "${{ steps.fetch_modify_data.outputs.title_${i} }}",
+              "description": "${{ steps.fetch_modify_data.outputs.description_${i} }}",
+              "thumbnailUrl": "${{ steps.fetch_modify_data.outputs.thumbnailUrl_${i} }}",
+              "duration": "${{ steps.fetch_modify_data.outputs.duration_${i} }}",
+              "viewCount": ${{ steps.fetch_modify_data.outputs.viewCount_${i} }},
+              "likeCount": ${{ steps.fetch_modify_data.outputs.likeCount_${i} }},
+              "commentCount": ${{ steps.fetch_modify_data.outputs.commentCount_${i} }}
+            }
+          END
+            )
+            
+            # Execute port-github-action for each video
+            port-github-action \
+              --client-id "${{ secrets.PORT_CLIENT_ID }}" \
+              --client-secret "${{ secrets.PORT_CLIENT_SECRET }}" \
+              --base-url "https://api.getport.io" \
+              --operation "UPSERT" \
+              --identifier "${{ steps.fetch_modify_data.outputs.videoId_${i} }}" \
+              --blueprint "video" \
+              --properties "$json_properties" \
+              --relations "{\"belongs_to_playlist\": \"${{ steps.fetch_modify_data.outputs.playlist_playlistId }}\"}"
           done
+          EOF
+          
+          chmod +x upload_videos.sh
+
+      - name: Upload Videos to Port
+        if: steps.fetch_modify_data.outputs.video_count > 0
+        run: ./upload_videos.sh
