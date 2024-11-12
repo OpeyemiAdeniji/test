@@ -60,7 +60,7 @@ jobs:
               "title": "${{ steps.fetch_modify_data.outputs.playlist_title }}",
               "description": "${{ steps.fetch_modify_data.outputs.playlist_description }}",
               "thumbnailUrl": "${{ steps.fetch_modify_data.outputs.playlist_thumbnailUrl }}",
-              "videoCount": "${{ steps.fetch_modify_data.outputs.playlist_videoCount }}",
+              "videoCount": ${{ steps.fetch_modify_data.outputs.playlist_videoCount }},
               "created_at": "${{ steps.fetch_modify_data.outputs.playlist_created_at }}"
             }
 
