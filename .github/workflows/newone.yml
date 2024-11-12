@@ -55,6 +55,8 @@ jobs:
               'clientSecret': PORT_CLIENT_SECRET
                 }
 
+          print(credentials)
+
           def fetch_playlist_details(playlist_id):
               url = f'https://www.googleapis.com/youtube/v3/playlists?part=snippet,contentDetails,status&id={playlist_id}&key={YOUTUBE_API_KEY}'
               response = requests.get(url)
@@ -93,7 +95,9 @@ jobs:
           # Get Port access token
 
           token_response = requests.post(f'{API_URL}/auth/access_token', json=credentials)
+          print(token_response)
           access_token = token_response.json().get('accessToken')
+          print(f'Access token - {access_token}')
 
           headers = {
                 'Authorization': f'Bearer {access_token}'
