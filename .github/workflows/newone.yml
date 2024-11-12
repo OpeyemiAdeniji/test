@@ -93,7 +93,7 @@ jobs:
           # Get Port access token
 
           token_response = requests.post(f'{API_URL}/auth/access_token', json=credentials)
-          access_token = token_response.json()['accessToken']
+          access_token = token_response.json().get('accessToken')
 
           headers = {
                 'Authorization': f'Bearer {access_token}'
