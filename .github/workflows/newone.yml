@@ -1,4 +1,5 @@
 name: Update Port with YouTube Playlist Data
+
 on:
   workflow_dispatch:
     inputs:
@@ -19,147 +20,130 @@ jobs:
       PORT_RUN_ID: ${{ fromJson(inputs.port_context).runId }}
 
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+    - name: Checkout code
+      uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v2
-        with:
-          python-version: '3.x'
+    - name: Create Bash script
+      run: |
+        cat << 'EOF' > fetch_youtube.sh
+        #!/bin/bash
 
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install requests
+        # Constants and setup
+        YOUTUBE_API_KEY="${{ secrets.YOUTUBE_API_KEY }}"
+        echo "YOUTUBE_API_KEY: ${YOUTUBE_API_KEY:-'Missing'}"
+        PLAYLIST_ID="${{ inputs.playlistid }}"
+        echo "PLAYLIST_ID: ${PLAYLIST_ID}"
+        PORT_CLIENT_ID="${{ secrets.PORT_CLIENT_ID }}"
+        echo "PORT_CLIENT_ID: ${PORT_CLIENT_ID}"
+        PORT_CLIENT_SECRET="${{ secrets.PORT_CLIENT_SECRET }}"
+        echo "PORT_CLIENT_SECRET: ${PORT_CLIENT_SECRET}"
+        API_URL="https://api.getport.io/v1"
 
-      - name: Create Python script
-        run: |
-          cat << 'EOF' > fetch_youtube.py
-          import os
-          import requests
-          import json
-          from datetime import datetime
+        credentials=$(jq -n \
+          --arg clientId "$PORT_CLIENT_ID" \
+          --arg clientSecret "$PORT_CLIENT_SECRET" \
+          '{clientId: $clientId, clientSecret: $clientSecret}')
 
-          # Constants and setup
-          YOUTUBE_API_KEY = os.environ['YOUTUBE_API_KEY']
-          print('YOUTUBE_API_KEY:', '***' if YOUTUBE_API_KEY else 'Missing')
-          playlist_id = os.environ['PLAYLIST_ID']
-          print('PLAYLIST_ID:', playlist_id)
-          PORT_CLIENT_ID = os.environ['PORT_CLIENT_ID']
-          print('PORT_CLIENT_ID:', repr(PORT_CLIENT_ID))
-          PORT_CLIENT_SECRET = os.environ['PORT_CLIENT_SECRET']
-          print('PORT_CLIENT_SECRET:', repr(PORT_CLIENT_SECRET))
-          API_URL = 'https://api.getport.io/v1'
+        echo "Credentials payload: $credentials"
 
-          credentials = {
-              'clientId': PORT_CLIENT_ID.strip(),
-              'clientSecret': PORT_CLIENT_SECRET.strip()
-          }
+        fetch_playlist_details() {
+          local playlist_id="$1"
+          local url="https://www.googleapis.com/youtube/v3/playlists?part=snippet,contentDetails,status&id=$playlist_id&key=$YOUTUBE_API_KEY"
+          local response=$(curl -s "$url")
+          echo "$response" | jq -r '.items[0]'
+        }
 
-          print("Credentials payload:", json.dumps(credentials))
+        fetch_video_details() {
+          local video_id="$1"
+          local url="https://www.googleapis.com/youtube/v3/videos?part=snippet,contentDetails,statistics&id=$video_id&key=$YOUTUBE_API_KEY"
+          local response=$(curl -s "$url")
+          echo "$response" | jq -r '.items[0]'
+        }
 
-          def fetch_playlist_details(playlist_id):
-              url = f'https://www.googleapis.com/youtube/v3/playlists?part=snippet,contentDetails,status&id={playlist_id}&key={YOUTUBE_API_KEY}'
-              response = requests.get(url)
-              response.raise_for_status()
-              return response.json()['items'][0]
+        fetch_playlist_videos() {
+          local playlist_id="$1"
+          local videos=()
+          local url="https://www.googleapis.com/youtube/v3/playlistItems?part=snippet&maxResults=50&playlistId=$playlist_id&key=$YOUTUBE_API_KEY"
+          while [ -n "$url" ]; do
+            local response=$(curl -s "$url")
+            local items=$(echo "$response" | jq -r '.items[]')
+            for item in $items; do
+              local video_id=$(echo "$item" | jq -r '.snippet.resourceId.videoId')
+              local video_details=$(fetch_video_details "$video_id")
+              videos+=("$video_details")
+            done
+            local next_page_token=$(echo "$response" | jq -r '.nextPageToken')
+            if [ -n "$next_page_token" ]; then
+              url="https://www.googleapis.com/youtube/v3/playlistItems?part=snippet&maxResults=50&pageToken=$next_page_token&playlistId=$playlist_id&key=$YOUTUBE_API_KEY"
+            else
+              url=""
+            fi
+          done
+          echo "${videos[@]}"
+        }
 
-          def fetch_video_details(video_id):
-              url = f'https://www.googleapis.com/youtube/v3/videos?part=snippet,contentDetails,statistics&id={video_id}&key={YOUTUBE_API_KEY}'
-              response = requests.get(url)
-              response.raise_for_status()
-              return response.json()['items'][0]
+        sanitize_value() {
+          local value="$1"
+          echo "$value" | tr -d '\n\r"' | xargs
+        }
 
-          def fetch_playlist_videos(playlist_id):
-              videos = []
-              url = f'https://www.googleapis.com/youtube/v3/playlistItems?part=snippet&maxResults=50&playlistId={playlist_id}&key={YOUTUBE_API_KEY}'
-              while url:
-                  response = requests.get(url)
-                  response.raise_for_status()
-                  data = response.json()
-                  for item in data.get('items', []):
-                      video_id = item['snippet']['resourceId']['videoId']
-                      video_details = fetch_video_details(video_id)
-                      videos.append(video_details)
-                  next_page_token = data.get('nextPageToken')
-                  if next_page_token:
-                      url = f'https://www.googleapis.com/youtube/v3/playlistItems?part=snippet&maxResults=50&pageToken={next_page_token}&playlistId={playlist_id}&key={YOUTUBE_API_KEY}'
-                  else:
-                      url = None
-              return videos
+        # Get Port access token
+        token_response=$(curl -s -X POST -H "Content-Type: application/json" -d "$credentials" "$API_URL/auth/access_token")
+        echo "Token response: $token_response"
+        access_token=$(echo "$token_response" | jq -r '.accessToken')
+        echo "Access token: $access_token"
 
-          def sanitize_value(value):
-              if isinstance(value, str):
-                  return value.replace('\n', ' ').replace('\r', ' ').replace('"', '\\"').strip()
-              return value
+        headers="-H 'Authorization: Bearer $access_token'"
 
-          # Get Port access token
+        # Fetch playlist details
+        playlist=$(fetch_playlist_details "$PLAYLIST_ID")
 
-          token_response = requests.post(f'{API_URL}/auth/access_token', json=credentials)
-          print(token_response)
-          access_token = token_response.json().get('accessToken')
-          print(f'Access token - {access_token}')
+        # Create playlist in Port
+        playlist_entity=$(jq -n \
+          --arg id "$playlist.id" \
+          --arg title "$(sanitize_value "$playlist.snippet.title")" \
+          --arg playlistId "$playlist.id" \
+          --arg description "$(sanitize_value "$playlist.snippet.description")" \
+          --arg thumbnailUrl "$playlist.snippet.thumbnails.default.url" \
+          --arg videoCount "$playlist.contentDetails.itemCount" \
+          --arg created_at "$playlist.snippet.publishedAt" \
+          '{identifier: $id, title: $title, properties: {playlistId: $playlistId, title: $title, description: $description, thumbnailUrl: $thumbnailUrl, videoCount: ($videoCount|tonumber), created_at: $created_at}}')
 
-          headers = {
-                'Authorization': f'Bearer {access_token}'
-            }
+        playlist_response=$(curl -s -X POST $headers -H "Content-Type: application/json" -d "$playlist_entity" "$API_URL/blueprints/playlist/entities?upsert=true")
+        echo "Playlist sync status: $playlist_response"
 
-          # Fetch playlist details
-          playlist = fetch_playlist_details(playlist_id)
+        # Fetch and upload videos
+        videos=$(fetch_playlist_videos "$PLAYLIST_ID")
 
-          # Create playlist in Port
-          playlist_entity = {
-              'identifier': playlist['id'],
-              'title': sanitize_value(playlist['snippet']['title']),
-              'properties': {
-                  'playlistId': playlist['id'],
-                  'title': sanitize_value(playlist['snippet']['title']),
-                  'description': sanitize_value(playlist['snippet']['description']),
-                  'thumbnailUrl': playlist['snippet']['thumbnails']['default']['url'],
-                  'videoCount': playlist['contentDetails']['itemCount'],
-                  'created_at': playlist['snippet']['publishedAt']
-              }
-          }
+        for video in $videos; do
+          video_id=$(echo "$video" | jq -r '.id')
+          snippet=$(echo "$video" | jq -r '.snippet')
+          statistics=$(echo "$video" | jq -r '.statistics // {}')
+          content_details=$(echo "$video" | jq -r '.contentDetails // {}')
 
-          playlist_response = requests.post(f'{API_URL}/blueprints/playlist/entities?upsert=true',json=playlist_entity,headers=headers)
-          print(f"Playlist sync status: {playlist_response.status_code}")
+          video_entity=$(jq -n \
+            --arg id "$video_id" \
+            --arg title "$(sanitize_value "$snippet.title")" \
+            --arg videoId "$video_id" \
+            --arg description "$(sanitize_value "$snippet.description")" \
+            --arg thumbnailUrl "$snippet.thumbnails.default.url" \
+            --arg duration "$content_details.duration" \
+            --arg viewCount "$statistics.viewCount" \
+            --arg likeCount "$statistics.likeCount" \
+            --arg commentCount "$statistics.commentCount" \
+            --arg playlistId "$playlist.id" \
+            '{identifier: $id, title: $title, properties: {videoId: $videoId, title: $title, description: $description, thumbnailUrl: $thumbnailUrl, duration: $duration, viewCount: ($viewCount|tonumber), likeCount: ($likeCount|tonumber), commentCount: ($commentCount|tonumber)}, relations: {belongs_to_playlist: $playlistId}}')
 
-          # Fetch and upload videos
-          videos = fetch_playlist_videos(playlist_id)
-          
-          for video in videos:
-              snippet = video['snippet']
-              statistics = video.get('statistics', {})
-              content_details = video.get('contentDetails', {})
-              
-              video_entity = {
-                  'identifier': video['id'],
-                  'title': sanitize_value(snippet['title']),
-                  'properties': {
-                      'videoId': video['id'],
-                      'title': sanitize_value(snippet['title']),
-                      'description': sanitize_value(snippet['description']),
-                      'thumbnailUrl': snippet['thumbnails']['default']['url'],
-                      'duration': content_details.get('duration', ''),
-                      'viewCount': int(statistics.get('viewCount', 0)),
-                      'likeCount': int(statistics.get('likeCount', 0)),
-                      'commentCount': int(statistics.get('commentCount', 0))
-                  },
-                  'relations': {
-                      'belongs_to_playlist': playlist['id']
-                  }
-              }
-              
-              video_response = requests.post(f'{API_URL}/blueprints/video/entities?upsert=true',json=video_entity,headers=headers)
-              print(f"video sync status: {video_response.status_code}")
+          video_response=$(curl -s -X POST $headers -H "Content-Type: application/json" -d "$video_entity" "$API_URL/blueprints/video/entities?upsert=true")
+          echo "Video sync status: $video_response"
+        done
+        EOF
 
-          EOF
-
-      - name: Fetch and Process YouTube Data
-        id: fetch_data
-        env:
-          YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
-          PLAYLIST_ID: ${{ inputs.playlistid }}
-          PORT_CLIENT_ID: ${{ secrets.PORT_CLIENT_ID }}
-          PORT_CLIENT_SECRET: ${{ secrets.PORT_CLIENT_SECRET }}
-        run: python fetch_youtube.py
+    - name: Fetch and Process YouTube Data
+      id: fetch_data
+      env:
+        YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
+        PLAYLIST_ID: ${{ inputs.playlistid }}
+        PORT_CLIENT_ID: ${{ secrets.PORT_CLIENT_ID }}
+        PORT_CLIENT_SECRET: ${{ secrets.PORT_CLIENT_SECRET }}
+      run: bash fetch_youtube.sh
