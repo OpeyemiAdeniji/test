@@ -110,19 +110,20 @@ jobs:
           echo "$playlist_entity" | jq .
 
           # Use HTTP/1.1 to avoid HTTP/2 protocol issues and capture response
-          response=$(curl --http1.1 -s -w "%{http_code}" -o /tmp/playlist_response.json -X POST "https://api.getport.io/v1/blueprints/playlist/entities?upsert=true" \
+          response=$(curl --http1.1 -s -w "%{http_code}\n" -o /tmp/playlist_response.json -X POST "https://api.getport.io/v1/blueprints/playlist/entities?upsert=true" \
             -H "Authorization: Bearer $ACCESS_TOKEN" \
             -H "Content-Type: application/json" \
             -d "$playlist_entity")
 
-          http_code=$(tail -c 3 <<< "$response")
+          http_code=$(echo "$response" | head -c 1)
           body=$(cat /tmp/playlist_response.json)
 
           echo "HTTP Response Code: $http_code"
           echo "Response Body: $body"
 
-          if [[ "$http_code" -ne 200 && "$http_code" -ne 201 ]]; then
+          if [[ "$http_code" != "2" ]]; then
             echo "Failed to push playlist to Port. HTTP code: $http_code"
+            echo "Response Body: $body"
             exit 1
           fi
 
@@ -173,19 +174,20 @@ jobs:
               echo "$video_entity" | jq .
 
               # Use HTTP/1.1 to avoid HTTP/2 protocol issues and capture response
-              response=$(curl --http1.1 -s -w "%{http_code}" -o /tmp/video_response.json -X POST "https://api.getport.io/v1/blueprints/video/entities?upsert=true" \
+              response=$(curl --http1.1 -s -w "%{http_code}\n" -o /tmp/video_response.json -X POST "https://api.getport.io/v1/blueprints/video/entities?upsert=true" \
                 -H "Authorization: Bearer $ACCESS_TOKEN" \
                 -H "Content-Type: application/json" \
                 -d "$video_entity")
 
-              http_code=$(tail -c 3 <<< "$response")
+              http_code=$(echo "$response" | head -c 1)
               body=$(cat /tmp/video_response.json)
 
               echo "HTTP Response Code: $http_code"
               echo "Response Body: $body"
 
-              if [[ "$http_code" -ne 200 && "$http_code" -ne 201 ]]; then
+              if [[ "$http_code" != "2" ]]; then
                 echo "Failed to push video to Port. HTTP code: $http_code"
+                echo "Response Body: $body"
                 exit 1
               fi
             done
