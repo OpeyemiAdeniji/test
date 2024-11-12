@@ -89,8 +89,12 @@ jobs:
               }
             }')
 
-          # Upload playlist to Port
-          curl -s -X POST "https://api.getport.io/v1/blueprints/playlist/entities?upsert=true" \
+          # Print JSON payload for validation
+          echo "Payload: $playlist_entity"
+          echo "$playlist_entity" | jq .
+
+          # Verbose curl for detailed debugging
+          curl -v -X POST "https://api.getport.io/v1/blueprints/playlist/entities?upsert=true" \
             -H "Authorization: Bearer $ACCESS_TOKEN" \
             -H "Content-Type: application/json" \
             -d "$playlist_entity"
@@ -137,8 +141,12 @@ jobs:
                   }
                 }')
 
+              # Print video payload for validation
+              echo "Video Payload: $video_entity"
+              echo "$video_entity" | jq .
+
               # Upload video to Port
-              curl -s -X POST "https://api.getport.io/v1/blueprints/video/entities?upsert=true" \
+              curl -v -X POST "https://api.getport.io/v1/blueprints/video/entities?upsert=true" \
                 -H "Authorization: Bearer $ACCESS_TOKEN" \
                 -H "Content-Type: application/json" \
                 -d "$video_entity"
