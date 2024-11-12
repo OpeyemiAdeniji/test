@@ -20,130 +20,163 @@ jobs:
       PORT_RUN_ID: ${{ fromJson(inputs.port_context).runId }}
 
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
+      - name: Checkout code
+        uses: actions/checkout@v4
 
-    - name: Create Bash script
-      run: |
-        cat << 'EOF' > fetch_youtube.sh
-        #!/bin/bash
+      - name: Create Bash script
+        run: |
+          cat << 'EOF' > fetch_youtube.sh
+          #!/bin/bash
 
-        # Constants and setup
-        YOUTUBE_API_KEY="${{ secrets.YOUTUBE_API_KEY }}"
-        echo "YOUTUBE_API_KEY: ${YOUTUBE_API_KEY:-'Missing'}"
-        PLAYLIST_ID="${{ inputs.playlistid }}"
-        echo "PLAYLIST_ID: ${PLAYLIST_ID}"
-        PORT_CLIENT_ID="${{ secrets.PORT_CLIENT_ID }}"
-        echo "PORT_CLIENT_ID: ${PORT_CLIENT_ID}"
-        PORT_CLIENT_SECRET="${{ secrets.PORT_CLIENT_SECRET }}"
-        echo "PORT_CLIENT_SECRET: ${PORT_CLIENT_SECRET}"
-        API_URL="https://api.getport.io/v1"
+          # Constants and setup
+          YOUTUBE_API_KEY="${YOUTUBE_API_KEY}"
+          PLAYLIST_ID="${PLAYLIST_ID}"
+          PORT_CLIENT_ID="${PORT_CLIENT_ID}"
+          PORT_CLIENT_SECRET="${PORT_CLIENT_SECRET}"
+          API_URL="https://api.getport.io/v1"
 
-        credentials=$(jq -n \
-          --arg clientId "$PORT_CLIENT_ID" \
-          --arg clientSecret "$PORT_CLIENT_SECRET" \
-          '{clientId: $clientId, clientSecret: $clientSecret}')
+          # Verify environment variables are set
+          if [[ -z "$YOUTUBE_API_KEY" || -z "$PLAYLIST_ID" || -z "$PORT_CLIENT_ID" || -z "$PORT_CLIENT_SECRET" ]]; then
+            echo "Error: One or more required environment variables are not set."
+            exit 1
+          fi
 
-        echo "Credentials payload: $credentials"
+          credentials=$(jq -n \
+            --arg clientId "$PORT_CLIENT_ID" \
+            --arg clientSecret "$PORT_CLIENT_SECRET" \
+            '{clientId: $clientId, clientSecret: $clientSecret}')
 
-        fetch_playlist_details() {
-          local playlist_id="$1"
-          local url="https://www.googleapis.com/youtube/v3/playlists?part=snippet,contentDetails,status&id=$playlist_id&key=$YOUTUBE_API_KEY"
-          local response=$(curl -s "$url")
-          echo "$response" | jq -r '.items[0]'
-        }
+          echo "Requesting access token..."
+          token_response=$(curl -s -X POST -H "Content-Type: application/json" -d "$credentials" "$API_URL/auth/access_token")
+          access_token=$(echo "$token_response" | jq -r '.accessToken')
 
-        fetch_video_details() {
-          local video_id="$1"
-          local url="https://www.googleapis.com/youtube/v3/videos?part=snippet,contentDetails,statistics&id=$video_id&key=$YOUTUBE_API_KEY"
-          local response=$(curl -s "$url")
-          echo "$response" | jq -r '.items[0]'
-        }
+          if [[ "$access_token" == "null" || -z "$access_token" ]]; then
+            echo "Error: Failed to retrieve access token. Response: $token_response"
+            exit 1
+          fi
+          echo "Access token acquired."
 
-        fetch_playlist_videos() {
-          local playlist_id="$1"
-          local videos=()
-          local url="https://www.googleapis.com/youtube/v3/playlistItems?part=snippet&maxResults=50&playlistId=$playlist_id&key=$YOUTUBE_API_KEY"
-          while [ -n "$url" ]; do
+          # Fetch playlist details
+          fetch_playlist_details() {
+            local playlist_id="$1"
+            local url="https://www.googleapis.com/youtube/v3/playlists?part=snippet,contentDetails,status&id=$playlist_id&key=$YOUTUBE_API_KEY"
             local response=$(curl -s "$url")
-            local items=$(echo "$response" | jq -r '.items[]')
-            for item in $items; do
-              local video_id=$(echo "$item" | jq -r '.snippet.resourceId.videoId')
-              local video_details=$(fetch_video_details "$video_id")
-              videos+=("$video_details")
-            done
-            local next_page_token=$(echo "$response" | jq -r '.nextPageToken')
-            if [ -n "$next_page_token" ]; then
-              url="https://www.googleapis.com/youtube/v3/playlistItems?part=snippet&maxResults=50&pageToken=$next_page_token&playlistId=$playlist_id&key=$YOUTUBE_API_KEY"
-            else
-              url=""
+
+            # Check if the response is valid JSON
+            if ! echo "$response" | jq -e . > /dev/null 2>&1; then
+              echo "Error: Invalid response for playlist details."
+              return 1
             fi
+
+            echo "$response" | jq -r '.items[0]'
+          }
+
+          # Fetch video details
+          fetch_video_details() {
+            local video_id="$1"
+            local url="https://www.googleapis.com/youtube/v3/videos?part=snippet,contentDetails,statistics&id=$video_id&key=$YOUTUBE_API_KEY"
+            local response=$(curl -s "$url")
+
+            if ! echo "$response" | jq -e . > /dev/null 2>&1; then
+              echo "Error: Invalid response for video ID $video_id."
+              return 1
+            fi
+
+            echo "$response" | jq -r '.items[0]'
+          }
+
+          # Fetch playlist videos
+          fetch_playlist_videos() {
+            local playlist_id="$1"
+            local url="https://www.googleapis.com/youtube/v3/playlistItems?part=snippet&maxResults=50&playlistId=$playlist_id&key=$YOUTUBE_API_KEY"
+            local videos=()
+
+            while [ -n "$url" ]; do
+              local response=$(curl -s "$url")
+
+              if ! echo "$response" | jq -e . > /dev/null 2>&1; then
+                echo "Error: Invalid response while fetching playlist videos."
+                break
+              fi
+
+              local items=$(echo "$response" | jq -c '.items[]')
+              for item in $items; do
+                local video_id=$(echo "$item" | jq -r '.snippet.resourceId.videoId')
+                local video_details=$(fetch_video_details "$video_id")
+
+                if [ -n "$video_details" ]; then
+                  videos+=("$video_details")
+                fi
+              done
+
+              local next_page_token=$(echo "$response" | jq -r '.nextPageToken // empty')
+              if [ -n "$next_page_token" ]; then
+                url="https://www.googleapis.com/youtube/v3/playlistItems?part=snippet&maxResults=50&pageToken=$next_page_token&playlistId=$playlist_id&key=$YOUTUBE_API_KEY"
+              else
+                url=""
+              fi
+            done
+
+            echo "${videos[@]}"
+          }
+
+          # Sanitize values for JSON
+          sanitize_value() {
+            local value="$1"
+            echo "$value" | tr -d '\n\r"' | xargs
+          }
+
+          # Fetch and process playlist
+          playlist=$(fetch_playlist_details "$PLAYLIST_ID")
+          if [ -z "$playlist" ]; then
+            echo "Error: Playlist details could not be fetched."
+            exit 1
+          fi
+
+          playlist_entity=$(jq -n \
+            --arg id "$(echo "$playlist" | jq -r '.id')" \
+            --arg title "$(sanitize_value "$(echo "$playlist" | jq -r '.snippet.title')")" \
+            --arg playlistId "$(echo "$playlist" | jq -r '.id')" \
+            --arg description "$(sanitize_value "$(echo "$playlist" | jq -r '.snippet.description')")" \
+            --arg thumbnailUrl "$(echo "$playlist" | jq -r '.snippet.thumbnails.default.url')" \
+            --arg videoCount "$(echo "$playlist" | jq -r '.contentDetails.itemCount')" \
+            --arg created_at "$(echo "$playlist" | jq -r '.snippet.publishedAt')" \
+            '{identifier: $id, title: $title, properties: {playlistId: $playlistId, title: $title, description: $description, thumbnailUrl: $thumbnailUrl, videoCount: ($videoCount|tonumber), created_at: $created_at}}')
+
+          playlist_response=$(curl -s -X POST -H "Authorization: Bearer $access_token" -H "Content-Type: application/json" -d "$playlist_entity" "$API_URL/blueprints/playlist/entities?upsert=true")
+          echo "Playlist sync status: $playlist_response"
+
+          # Fetch and upload video details
+          videos=$(fetch_playlist_videos "$PLAYLIST_ID")
+          for video in "${videos[@]}"; do
+            video_id=$(echo "$video" | jq -r '.id')
+            snippet=$(echo "$video" | jq -r '.snippet')
+            statistics=$(echo "$video" | jq -r '.statistics // {}')
+            content_details=$(echo "$video" | jq -r '.contentDetails // {}')
+
+            video_entity=$(jq -n \
+              --arg id "$video_id" \
+              --arg title "$(sanitize_value "$(echo "$snippet" | jq -r '.title')")" \
+              --arg videoId "$video_id" \
+              --arg description "$(sanitize_value "$(echo "$snippet" | jq -r '.description')")" \
+              --arg thumbnailUrl "$(echo "$snippet" | jq -r '.thumbnails.default.url')" \
+              --arg duration "$(echo "$content_details" | jq -r '.duration')" \
+              --arg viewCount "$(echo "$statistics" | jq -r '.viewCount // "0"')" \
+              --arg likeCount "$(echo "$statistics" | jq -r '.likeCount // "0"')" \
+              --arg commentCount "$(echo "$statistics" | jq -r '.commentCount // "0"')" \
+              --arg playlistId "$(echo "$playlist" | jq -r '.id')" \
+              '{identifier: $id, title: $title, properties: {videoId: $videoId, title: $title, description: $description, thumbnailUrl: $thumbnailUrl, duration: $duration, viewCount: ($viewCount|tonumber), likeCount: ($likeCount|tonumber), commentCount: ($commentCount|tonumber)}, relations: {belongs_to_playlist: $playlistId}}')
+
+            video_response=$(curl -s -X POST -H "Authorization: Bearer $access_token" -H "Content-Type: application/json" -d "$video_entity" "$API_URL/blueprints/video/entities?upsert=true")
+            echo "Video sync status: $video_response"
           done
-          echo "${videos[@]}"
-        }
+          EOF
 
-        sanitize_value() {
-          local value="$1"
-          echo "$value" | tr -d '\n\r"' | xargs
-        }
-
-        # Get Port access token
-        token_response=$(curl -s -X POST -H "Content-Type: application/json" -d "$credentials" "$API_URL/auth/access_token")
-        echo "Token response: $token_response"
-        access_token=$(echo "$token_response" | jq -r '.accessToken')
-        echo "Access token: $access_token"
-
-        headers="-H 'Authorization: Bearer $access_token'"
-
-        # Fetch playlist details
-        playlist=$(fetch_playlist_details "$PLAYLIST_ID")
-
-        # Create playlist in Port
-        playlist_entity=$(jq -n \
-          --arg id "$playlist.id" \
-          --arg title "$(sanitize_value "$playlist.snippet.title")" \
-          --arg playlistId "$playlist.id" \
-          --arg description "$(sanitize_value "$playlist.snippet.description")" \
-          --arg thumbnailUrl "$playlist.snippet.thumbnails.default.url" \
-          --arg videoCount "$playlist.contentDetails.itemCount" \
-          --arg created_at "$playlist.snippet.publishedAt" \
-          '{identifier: $id, title: $title, properties: {playlistId: $playlistId, title: $title, description: $description, thumbnailUrl: $thumbnailUrl, videoCount: ($videoCount|tonumber), created_at: $created_at}}')
-
-        playlist_response=$(curl -s -X POST $headers -H "Content-Type: application/json" -d "$playlist_entity" "$API_URL/blueprints/playlist/entities?upsert=true")
-        echo "Playlist sync status: $playlist_response"
-
-        # Fetch and upload videos
-        videos=$(fetch_playlist_videos "$PLAYLIST_ID")
-
-        for video in $videos; do
-          video_id=$(echo "$video" | jq -r '.id')
-          snippet=$(echo "$video" | jq -r '.snippet')
-          statistics=$(echo "$video" | jq -r '.statistics // {}')
-          content_details=$(echo "$video" | jq -r '.contentDetails // {}')
-
-          video_entity=$(jq -n \
-            --arg id "$video_id" \
-            --arg title "$(sanitize_value "$snippet.title")" \
-            --arg videoId "$video_id" \
-            --arg description "$(sanitize_value "$snippet.description")" \
-            --arg thumbnailUrl "$snippet.thumbnails.default.url" \
-            --arg duration "$content_details.duration" \
-            --arg viewCount "$statistics.viewCount" \
-            --arg likeCount "$statistics.likeCount" \
-            --arg commentCount "$statistics.commentCount" \
-            --arg playlistId "$playlist.id" \
-            '{identifier: $id, title: $title, properties: {videoId: $videoId, title: $title, description: $description, thumbnailUrl: $thumbnailUrl, duration: $duration, viewCount: ($viewCount|tonumber), likeCount: ($likeCount|tonumber), commentCount: ($commentCount|tonumber)}, relations: {belongs_to_playlist: $playlistId}}')
-
-          video_response=$(curl -s -X POST $headers -H "Content-Type: application/json" -d "$video_entity" "$API_URL/blueprints/video/entities?upsert=true")
-          echo "Video sync status: $video_response"
-        done
-        EOF
-
-    - name: Fetch and Process YouTube Data
-      id: fetch_data
-      env:
-        YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
-        PLAYLIST_ID: ${{ inputs.playlistid }}
-        PORT_CLIENT_ID: ${{ secrets.PORT_CLIENT_ID }}
-        PORT_CLIENT_SECRET: ${{ secrets.PORT_CLIENT_SECRET }}
-      run: bash fetch_youtube.sh
+      - name: Fetch and Process YouTube Data
+        id: fetch_data
+        env:
+          YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
+          PLAYLIST_ID: ${{ inputs.playlistid }}
+          PORT_CLIENT_ID: ${{ secrets.PORT_CLIENT_ID }}
+          PORT_CLIENT_SECRET: ${{ secrets.PORT_CLIENT_SECRET }}
+        run: bash fetch_youtube.sh
