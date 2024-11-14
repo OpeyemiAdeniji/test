@@ -23,9 +23,9 @@ jobs:
 
       - name: Set PORT_RUN_ID from input
         id: export_port_run_id
-        run: echo "::set-output name=run_id::${{ fromJson(inputs.port_context).runId }}"
+        run: echo "run_id=${{ fromJson(inputs.port_context).runId }}" >> $GITHUB_OUTPUT
 
-  update_port_with_playlist_data:
+  fetch_videos:
     runs-on: ubuntu-latest
     needs: setup_environment
     env:
@@ -34,23 +34,6 @@ jobs:
       YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
       PLAYLIST_ID: ${{ inputs.playlistid }}
       PORT_RUN_ID: ${{ needs.setup_environment.outputs.port_run_id }}
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Fetch and Process YouTube Playlist Data
-        run: |
-          set -e
-          echo "Starting playlist processing..."
-
-  fetch_videos:
-    runs-on: ubuntu-latest
-    needs: update_port_with_playlist_data
-    env:
-      PORT_CLIENT_ID: ${{ secrets.PORT_CLIENT_ID }}
-      PORT_CLIENT_SECRET: ${{ secrets.PORT_CLIENT_SECRET }}
-      YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
-      PLAYLIST_ID: ${{ inputs.playlistid }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -64,14 +47,8 @@ jobs:
           # Function to get Port access token with proper JSON escaping
           get_port_access_token() {
             echo "Requesting Port access token..."
-            # Create JSON payload using jq to ensure proper escaping
-            payload=$(jq -n \
-              --arg client_id "$PORT_CLIENT_ID" \
-              --arg client_secret "$PORT_CLIENT_SECRET" \
-              '{
-                clientId: $client_id,
-                clientSecret: $client_secret
-              }')
+            # Create JSON payload using printf to ensure proper string formatting
+            payload=$(printf '{"clientId":"%s","clientSecret":"%s"}' "$PORT_CLIENT_ID" "$PORT_CLIENT_SECRET")
             
             response=$(curl -s -X POST "https://api.getport.io/v1/auth/access_token" \
               -H "Content-Type: application/json" \
@@ -79,14 +56,14 @@ jobs:
 
             # Check if the response contains an error
             if echo "$response" | jq -e '.ok == false' > /dev/null; then
-              echo "Error obtaining access token: $(echo "$response" | jq -r '.error // .message // "Unknown error"')"
+              echo "Error obtaining access token: $(echo "$response" | jq -r '.error // .message // "Unknown error"')" >&2
               return 1
             fi
 
             # Extract and validate access token
             access_token=$(echo "$response" | jq -r '.accessToken // empty')
             if [ -z "$access_token" ]; then
-              echo "Failed to retrieve access token. Response: $response"
+              echo "Failed to retrieve access token. Response: $response" >&2
               return 1
             fi
 
@@ -94,13 +71,23 @@ jobs:
           }
 
           # Validate environment variables
+          if [ -z "$PORT_CLIENT_ID" ]; then
+            echo "Error: PORT_CLIENT_ID is not set" >&2
+            exit 1
+          fi
+
+          if [ -z "$PORT_CLIENT_SECRET" ]; then
+            echo "Error: PORT_CLIENT_SECRET is not set" >&2
+            exit 1
+          fi
+
           if [ -z "$YOUTUBE_API_KEY" ]; then
-            echo "Error: YOUTUBE_API_KEY is not set"
+            echo "Error: YOUTUBE_API_KEY is not set" >&2
             exit 1
           fi
 
           if [ -z "$PLAYLIST_ID" ]; then
-            echo "Error: PLAYLIST_ID is not set"
+            echo "Error: PLAYLIST_ID is not set" >&2
             exit 1
           fi
 
@@ -108,7 +95,7 @@ jobs:
           echo "Getting Port access token..."
           ACCESS_TOKEN=$(get_port_access_token)
           if [ -z "$ACCESS_TOKEN" ]; then
-            echo "Failed to obtain access token. Exiting."
+            echo "Failed to obtain access token. Exiting." >&2
             exit 1
           fi
 
@@ -124,7 +111,7 @@ jobs:
             
             # Validate playlist response
             if ! echo "$response" | jq -e '.items' > /dev/null; then
-              echo "Error fetching playlist: $(echo "$response" | jq -r '.error.message // "Unknown error"')"
+              echo "Error fetching playlist: $(echo "$response" | jq -r '.error.message // "Unknown error"')" >&2
               exit 1
             fi
 
@@ -141,12 +128,6 @@ jobs:
               
               video_details=$(curl -s "https://www.googleapis.com/youtube/v3/videos?part=snippet,contentDetails,statistics&id=$video_id&key=${YOUTUBE_API_KEY}")
               
-              # Validate video details response
-              if ! echo "$video_details" | jq -e '.items[0]' > /dev/null; then
-                echo "Error fetching video details for $video_id: $(echo "$video_details" | jq -r '.error.message // "Unknown error"')"
-                continue
-              fi
-
               # Extract video details with proper error handling
               video_title=$(echo "$video_details" | jq -r '.items[0].snippet.title')
               video_description=$(echo "$video_details" | jq -r '.items[0].snippet.description')
@@ -156,34 +137,35 @@ jobs:
               video_like_count=$(echo "$video_details" | jq -r '.items[0].statistics.likeCount // "0"')
               video_comment_count=$(echo "$video_details" | jq -r '.items[0].statistics.commentCount // "0"')
 
-              echo "Creating video entity payload..."
-              video_entity=$(jq -n \
-                --arg id "$video_id" \
-                --arg title "$video_title" \
-                --arg description "$video_description" \
-                --arg thumbnailUrl "$video_thumbnail" \
-                --arg duration "$video_duration" \
-                --arg viewCount "$video_view_count" \
-                --arg likeCount "$video_like_count" \
-                --arg commentCount "$video_comment_count" \
-                --arg playlist_id "$PLAYLIST_ID" \
-                '{
-                  identifier: $id,
-                  title: $title,
-                  properties: {
-                    videoId: $id,
-                    title: $title,
-                    description: $description,
-                    thumbnailUrl: $thumbnailUrl,
-                    duration: $duration,
-                    viewCount: ($viewCount | tonumber),
-                    likeCount: ($likeCount | tonumber),
-                    commentCount: ($commentCount | tonumber)
-                  },
-                  relations: {
-                    belongs_to_playlist: $playlist_id
-                  }
-                }')
+              # Create video entity payload using printf for proper string formatting
+              video_entity=$(printf '{
+                "identifier": "%s",
+                "title": "%s",
+                "properties": {
+                  "videoId": "%s",
+                  "title": "%s",
+                  "description": "%s",
+                  "thumbnailUrl": "%s",
+                  "duration": "%s",
+                  "viewCount": %s,
+                  "likeCount": %s,
+                  "commentCount": %s
+                },
+                "relations": {
+                  "belongs_to_playlist": "%s"
+                }
+              }' \
+                "$video_id" \
+                "$video_title" \
+                "$video_id" \
+                "$video_title" \
+                "$video_description" \
+                "$video_thumbnail" \
+                "$video_duration" \
+                "$video_view_count" \
+                "$video_like_count" \
+                "$video_comment_count" \
+                "$PLAYLIST_ID")
 
               echo "Sending video entity to Port..."
               response=$(curl --http1.1 -s -w "\n%{http_code}" -X POST "https://api.getport.io/v1/blueprints/video/entities?upsert=true" \
@@ -194,12 +176,9 @@ jobs:
               http_code=$(echo "$response" | tail -n1)
               body=$(echo "$response" | sed '$d')
 
-              echo "HTTP Response Code: $http_code"
-              echo "Response Body: $body"
-
               if [[ ! "$http_code" =~ ^2[0-9][0-9]$ ]]; then
-                echo "Failed to push video to Port. HTTP code: $http_code"
-                echo "Response Body: $body"
+                echo "Failed to push video to Port. HTTP code: $http_code" >&2
+                echo "Response Body: $body" >&2
                 continue
               fi
 
