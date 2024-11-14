@@ -110,7 +110,7 @@ jobs:
       - name: Log video processing start
         run: |
           curl -X POST "https://api.getport.io/v1/actions/runs/$PORT_RUN_ID/logs" \
-            -H "Authorization: Bearer $ACCESS_TOKEN" \
+            -H "Authorization: Bearer ${{ needs.initialize.outputs.access_token }}" \
             -H "Content-Type: application/json" \
             -d '{"message": "Starting video processing"}'
 
@@ -142,7 +142,7 @@ jobs:
           for video_id in "${video_array[@]}"; do
             # Log video processing start
             curl -X POST "https://api.getport.io/v1/actions/runs/$PORT_RUN_ID/logs" \
-              -H "Authorization: Bearer $ACCESS_TOKEN" \
+              -H "Authorization: Bearer ${{ needs.initialize.outputs.access_token }}" \
               -H "Content-Type: application/json" \
               -d "{\"message\": \"Processing video $((processed_count + 1)) of $total_videos\"}"
             
@@ -167,13 +167,13 @@ jobs:
 
             # Create video in Port
             response=$(curl -s -X POST "https://api.getport.io/v1/blueprints/video/entities?upsert=true" \
-              -H "Authorization: Bearer $ACCESS_TOKEN" \
+              -H "Authorization: Bearer ${{ needs.initialize.outputs.access_token }}" \
               -H "Content-Type: application/json" \
               -d "$video_entity")
             
             # Log video creation
             curl -X POST "https://api.getport.io/v1/actions/runs/$PORT_RUN_ID/logs" \
-              -H "Authorization: Bearer $ACCESS_TOKEN" \
+              -H "Authorization: Bearer ${{ needs.initialize.outputs.access_token }}" \
               -H "Content-Type: application/json" \
               -d "{\"message\": \"Created video entity: $(echo "$video_response" | jq -r '.items[0].snippet.title')\"}"
             
@@ -182,7 +182,7 @@ jobs:
           
           # Final progress report
           curl -X POST "https://api.getport.io/v1/actions/runs/$PORT_RUN_ID/logs" \
-            -H "Authorization: Bearer $ACCESS_TOKEN" \
+            -H "Authorization: Bearer ${{ needs.initialize.outputs.access_token }}" \
             -H "Content-Type: application/json" \
             -d "{\"message\": \"Completed processing $processed_count videos\"}"
 
