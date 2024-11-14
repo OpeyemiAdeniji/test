@@ -44,7 +44,7 @@ jobs:
           set -e
           set -x
 
-          # Function to get Port access token with proper JSON escaping
+          # Function to get Port access token with proper JSON escaping and trimming
           get_port_access_token() {
             echo "Requesting Port access token..."
             # Trim any potential newline characters from the environment variables
@@ -70,8 +70,8 @@ jobs:
               return 1
             fi
 
-            # Extract and validate access token
-            access_token=$(echo "$response" | jq -r '.accessToken // empty')
+            # Extract and trim access token
+            access_token=$(echo "$response" | jq -r '.accessToken // empty' | xargs)
             if [ -z "$access_token" ]; then
               echo "Failed to retrieve access token. Response: $response"
               return 1
@@ -79,17 +79,6 @@ jobs:
 
             echo "$access_token"
           }
-
-          # Validate environment variables
-          if [ -z "$YOUTUBE_API_KEY" ]; then
-            echo "Error: YOUTUBE_API_KEY is not set"
-            exit 1
-          fi
-
-          if [ -z "$PLAYLIST_ID" ]; then
-            echo "Error: PLAYLIST_ID is not set"
-            exit 1
-          fi
 
           # Retrieve and validate access token
           echo "Getting Port access token..."
@@ -99,7 +88,8 @@ jobs:
             exit 1
           fi
 
-          echo "Successfully obtained access token"
+          # Debug log: Output part of the access token for verification
+          echo "Access token retrieved: ${ACCESS_TOKEN:0:10}..."
 
           # Process playlist videos
           next_page_token=""
