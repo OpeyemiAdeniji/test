@@ -163,11 +163,6 @@ jobs:
             [ -z "$next_page_token" ] && break
           done
 
-          # Final progress report
-          curl -X POST "https://api.getport.io/v1/actions/runs/$PORT_RUN_ID/logs" \
-            -H "Authorization: Bearer ${{ needs.initialize.outputs.access_token }}" \
-            -H "Content-Type: application/json" \
-            -d "{\"message\": \"Completed processing $processed_count videos\"}"
 
   finalize:
     needs: [process_playlist, process_videos]
