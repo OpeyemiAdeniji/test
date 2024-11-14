@@ -69,7 +69,11 @@ jobs:
     env:
       YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
       PORT_RUN_ID: ${{ fromJson(inputs.port_context).runId }}
+      ACCESS_TOKEN: ${{ needs.initialize.outputs.access_token }}
     steps:
+      - name: Install jq
+        run: sudo apt-get install jq
+
       - name: Process playlist
         run: |
           # Fetch playlist details
@@ -107,7 +111,7 @@ jobs:
           # Send playlist to Port
           response=$(curl --http1.1 -s -w "%{http_code}\n" -o /tmp/playlist_response.json \
             -X POST "https://api.getport.io/v1/blueprints/playlist/entities?upsert=true" \
-            -H "Authorization: Bearer ${{ needs.initialize.outputs.access_token }}" \
+            -H "Authorization: Bearer ${ACCESS_TOKEN}" \
             -H "Content-Type: application/json" \
             -d "$playlist_entity")
 
@@ -126,7 +130,11 @@ jobs:
     env:
       YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
       PORT_RUN_ID: ${{ fromJson(inputs.port_context).runId }}
+      ACCESS_TOKEN: ${{ needs.initialize.outputs.access_token }}
     steps:
+      - name: Install jq
+        run: sudo apt-get install jq
+        
       - name: Process videos
         run: |
           next_page_token=""
@@ -179,7 +187,7 @@ jobs:
               # Send video to Port
               response=$(curl --http1.1 -s -w "%{http_code}\n" -o /tmp/video_response.json \
                 -X POST "https://api.getport.io/v1/blueprints/video/entities?upsert=true" \
-                -H "Authorization: Bearer ${{ needs.initialize.outputs.access_token }}" \
+                -H "Authorization: Bearer ${ACCESS_TOKEN}" \
                 -H "Content-Type: application/json" \
                 -d "$video_entity")
 
