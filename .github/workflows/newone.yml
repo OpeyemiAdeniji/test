@@ -11,14 +11,14 @@ on:
         required: true
 
 jobs:
-  process_videos:
+  initialize:
     runs-on: ubuntu-latest
+    outputs:
+      access_token: ${{ steps.get_token.outputs.token }}
     env:
-      YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
       PORT_CLIENT_ID: ${{ secrets.PORT_CLIENT_ID }}
       PORT_CLIENT_SECRET: ${{ secrets.PORT_CLIENT_SECRET }}
       PORT_RUN_ID: ${{ fromJson(inputs.port_context).runId }}
-      PLAYLIST_ID: ${{ inputs.playlistid }}
     
     steps:
       - name: Get Port access token
@@ -32,41 +32,122 @@ jobs:
             }')
           
           token=$(echo "$response" | jq -r '.accessToken')
-          if [ -z "$token" ] || [ "$token" = "null" ]; then
+          if [ -z "$token" ]; then
             echo "Failed to get access token"
             exit 1
           fi
-          echo "PORT_TOKEN=$token" >> $GITHUB_ENV
+          echo "token=$token" >> $GITHUB_OUTPUT
+
+      - name: Log initialization start
+        run: |
+          curl -X POST "https://api.getport.io/v1/actions/runs/$PORT_RUN_ID/logs" \
+            -H "Authorization: Bearer ${{ steps.get_token.outputs.token }}" \
+            -H "Content-Type: application/json" \
+            -d '{"message": "Starting YouTube playlist ingestion"}'
+
+  process_playlist:
+    needs: initialize
+    runs-on: ubuntu-latest
+    env:
+      YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
+      PORT_RUN_ID: ${{ fromJson(inputs.port_context).runId }}
+      PORT_TOKEN: ${{ needs.initialize.outputs.access_token }}
+    
+    steps:
+      - name: Log playlist processing start
+        run: |
+          curl -X POST "https://api.getport.io/v1/actions/runs/$PORT_RUN_ID/logs" \
+            -H "Authorization: Bearer $PORT_TOKEN" \
+            -H "Content-Type: application/json" \
+            -d '{"message": "Fetching playlist details"}'
+
+      - name: Fetch playlist details
+        id: playlist_details
+        run: |
+          playlist_response=$(curl -s "https://www.googleapis.com/youtube/v3/playlists?part=snippet,contentDetails,status&id=${{ inputs.playlistid }}&key=$YOUTUBE_API_KEY")
+          
+          # Check if the API request was successful
+          if [ "$(echo "$playlist_response" | jq -r '.items | length')" -eq 0 ]; then
+            echo "Failed to fetch playlist details"
+            exit 1
+          fi
+          
+          # Create and store playlist details
+          echo "PLAYLIST_ID=$(echo $playlist_response | jq -r '.items[0].id')" >> $GITHUB_ENV
+          echo "PLAYLIST_TITLE=$(echo $playlist_response | jq -r '.items[0].snippet.title')" >> $GITHUB_ENV
+          echo "VIDEO_COUNT=$(echo $playlist_response | jq -r '.items[0].contentDetails.itemCount')" >> $GITHUB_ENV
+
+      - name: Create playlist entity in Port
+        run: |
+          playlist_entity=$(jq -n \
+            --arg id "$PLAYLIST_ID" \
+            --arg title "$PLAYLIST_TITLE" \
+            --arg count "$VIDEO_COUNT" \
+            '{
+              identifier: $id,
+              title: $title,
+              properties: {
+                playlistId: $id,
+                title: $title,
+                videoCount: ($count | tonumber)
+              }
+            }')
+
+          response=$(curl -s -X POST "https://api.getport.io/v1/blueprints/playlist/entities?upsert=true" \
+            -H "Authorization: Bearer $PORT_TOKEN" \
+            -H "Content-Type: application/json" \
+            -d "$playlist_entity")
+
+          if [ "$(echo "$response" | jq -r '.ok // false')" != "true" ]; then
+            echo "Failed to create playlist entity: $(echo "$response" | jq -r '.message // "Unknown error"')"
+            exit 1
+          fi
+
+  process_videos:
+    needs: [initialize, process_playlist]
+    runs-on: ubuntu-latest
+    env:
+      YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
+      PORT_RUN_ID: ${{ fromJson(inputs.port_context).runId }}
+      PORT_TOKEN: ${{ needs.initialize.outputs.access_token }}
+    
+    steps:
+      - name: Log video processing start
+        run: |
+          curl -X POST "https://api.getport.io/v1/actions/runs/$PORT_RUN_ID/logs" \
+            -H "Authorization: Bearer $PORT_TOKEN" \
+            -H "Content-Type: application/json" \
+            -d '{"message": "Starting video processing"}'
 
       - name: Process videos
         run: |
           next_page_token=""
           processed_count=0
           
-          # Log starting process
-          curl -X POST "https://api.getport.io/v1/actions/runs/$PORT_RUN_ID/logs" \
-            -H "Authorization: Bearer $PORT_TOKEN" \
-            -H "Content-Type: application/json" \
-            -d '{"message": "Starting video processing"}'
-          
           while :; do
-            url="https://www.googleapis.com/youtube/v3/playlistItems?part=snippet&maxResults=50&playlistId=$PLAYLIST_ID&key=$YOUTUBE_API_KEY${next_page_token:+&pageToken=$next_page_token}"
+            url="https://www.googleapis.com/youtube/v3/playlistItems?part=snippet&maxResults=50&playlistId=${{ inputs.playlistid }}&key=$YOUTUBE_API_KEY${next_page_token:+&pageToken=$next_page_token}"
             response=$(curl -s "$url")
+            
+            # Check if the API request was successful
+            if [ "$(echo "$response" | jq -r '.items | length')" -eq 0 ]; then
+              echo "No more videos to process or API error"
+              break
+            }
             
             # Process each video
             echo "$response" | jq -r '.items[].snippet.resourceId.videoId' | while read -r video_id; do
               video_details=$(curl -s "https://www.googleapis.com/youtube/v3/videos?part=snippet,contentDetails,statistics&id=$video_id&key=$YOUTUBE_API_KEY")
               
               # Create video entity
-              video_entity=$(echo "$video_details" | jq -r --arg playlist_id "$PLAYLIST_ID" '.items[0] | {
+              video_entity=$(echo "$video_details" | jq -r --arg playlist_id "${{ inputs.playlistid }}" '.items[0] | {
                 identifier: .id,
                 title: .snippet.title,
                 properties: {
                   videoId: .id,
                   title: .snippet.title,
                   duration: .contentDetails.duration,
-                  viewCount: (.statistics.viewCount | tonumber // 0),
-                  likeCount: (.statistics.likeCount | tonumber // 0)
+                  viewCount: (.statistics.viewCount | tonumber),
+                  likeCount: (.statistics.likeCount | tonumber)
                 },
                 relations: {
                   belongs_to_playlist: $playlist_id
@@ -74,19 +155,14 @@ jobs:
               }')
 
               # Upload to Port
-              upload_response=$(curl -s -w "\n%{http_code}" -X POST "https://api.getport.io/v1/blueprints/video/entities?upsert=true" \
+              upload_response=$(curl -s -X POST "https://api.getport.io/v1/blueprints/video/entities?upsert=true" \
                 -H "Authorization: Bearer $PORT_TOKEN" \
                 -H "Content-Type: application/json" \
                 -d "$video_entity")
-              
-              http_code=$(echo "$upload_response" | tail -n1)
-              if [[ "$http_code" != "2"* ]]; then
-                echo "Failed to upload video entity. Response: $upload_response"
-                curl -X POST "https://api.getport.io/v1/actions/runs/$PORT_RUN_ID/logs" \
-                  -H "Authorization: Bearer $PORT_TOKEN" \
-                  -H "Content-Type: application/json" \
-                  -d "{\"message\": \"Failed to upload video: $video_id\"}"
-                exit 1
+
+              if [ "$(echo "$upload_response" | jq -r '.ok // false')" != "true" ]; then
+                echo "Failed to create video entity: $(echo "$upload_response" | jq -r '.message // "Unknown error"')"
+                continue
               fi
 
               ((processed_count++))
@@ -99,7 +175,7 @@ jobs:
                   -d "{\"message\": \"Processed $processed_count videos\"}"
               fi
             done
-            
+
             next_page_token=$(echo "$response" | jq -r '.nextPageToken // empty')
             [ -z "$next_page_token" ] && break
           done
@@ -110,14 +186,23 @@ jobs:
             -H "Content-Type: application/json" \
             -d "{\"message\": \"Completed processing $processed_count videos\"}"
 
+  finalize:
+    needs: [initialize, process_playlist, process_videos]
+    runs-on: ubuntu-latest
+    if: always()
+    env:
+      PORT_RUN_ID: ${{ fromJson(inputs.port_context).runId }}
+      PORT_TOKEN: ${{ needs.initialize.outputs.access_token }}
+    
+    steps:
       - name: Report final status
-        uses: port-labs/port-github-action@v1
-        if: always()
-        with:
-          clientId: ${{ secrets.PORT_CLIENT_ID }}
-          clientSecret: ${{ secrets.PORT_CLIENT_SECRET }}
-          operation: PATCH_RUN
-          runId: ${{ env.PORT_RUN_ID }}
-          logMessage: "YouTube playlist ingestion complete"
-          status: ${{ job.status == 'success' && 'SUCCESS' || 'FAILURE' }}
-          baseUrl: https://api.getport.io
+        run: |
+          status="${{ needs.process_playlist.result == 'success' && needs.process_videos.result == 'success' && 'SUCCESS' || 'FAILURE' }}"
+          
+          curl -X PATCH "https://api.getport.io/v1/actions/runs/$PORT_RUN_ID" \
+            -H "Authorization: Bearer $PORT_TOKEN" \
+            -H "Content-Type: application/json" \
+            -d "{
+              \"status\": \"$status\",
+              \"message\": \"YouTube playlist ingestion complete with status: $status\"
+            }"
