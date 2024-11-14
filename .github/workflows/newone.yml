@@ -21,15 +21,12 @@ jobs:
       PORT_RUN_ID: ${{ fromJson(inputs.port_context).runId }}
     
     steps:
-      - name: Report job start
-        uses: port-labs/port-github-action@v1
-        with:
-          clientId: ${{ secrets.PORT_CLIENT_ID }}
-          clientSecret: ${{ secrets.PORT_CLIENT_SECRET }}
-          operation: PATCH_RUN
-          runId: ${{ fromJson(inputs.port_context).runId }}
-          logMessage: "Starting YouTube playlist ingestion"
-          status: RUNNING
+      - name: Log initialization start
+        run: |
+          curl -X POST "https://api.getport.io/v1/actions/runs/$PORT_RUN_ID/logs" \
+            -H "Content-Type: application/json" \
+            -d '{"message": "Starting YouTube playlist ingestion"}' \
+            -u "$PORT_CLIENT_ID:$PORT_CLIENT_SECRET"
       
       - name: Get Port access token
         id: get_token
@@ -56,15 +53,12 @@ jobs:
       PORT_RUN_ID: ${{ fromJson(inputs.port_context).runId }}
     
     steps:
-      - name: Report playlist processing start
-        uses: port-labs/port-github-action@v1
-        with:
-          clientId: ${{ secrets.PORT_CLIENT_ID }}
-          clientSecret: ${{ secrets.PORT_CLIENT_SECRET }}
-          operation: PATCH_RUN
-          runId: ${{ fromJson(inputs.port_context).runId }}
-          logMessage: "Fetching playlist details"
-          status: RUNNING
+      - name: Log playlist processing start
+        run: |
+          curl -X POST "https://api.getport.io/v1/actions/runs/$PORT_RUN_ID/logs" \
+            -H "Authorization: Bearer ${{ needs.initialize.outputs.access_token }}" \
+            -H "Content-Type: application/json" \
+            -d '{"message": "Fetching playlist details"}'
 
       - name: Fetch playlist details
         id: playlist_details
@@ -97,15 +91,12 @@ jobs:
             -H "Content-Type: application/json" \
             -d "$playlist_entity")
 
-      - name: Report playlist creation status
-        uses: port-labs/port-github-action@v1
-        with:
-          clientId: ${{ secrets.PORT_CLIENT_ID }}
-          clientSecret: ${{ secrets.PORT_CLIENT_SECRET }}
-          operation: PATCH_RUN
-          runId: ${{ fromJson(inputs.port_context).runId }}
-          logMessage: "Created playlist entity: ${{ env.PLAYLIST_TITLE }}"
-          status: RUNNING
+      - name: Log playlist creation
+        run: |
+          curl -X POST "https://api.getport.io/v1/actions/runs/$PORT_RUN_ID/logs" \
+            -H "Authorization: Bearer ${{ needs.initialize.outputs.access_token }}" \
+            -H "Content-Type: application/json" \
+            -d "{\"message\": \"Created playlist entity: $PLAYLIST_TITLE\"}"
 
   process_videos:
     needs: [initialize, process_playlist]
@@ -115,15 +106,12 @@ jobs:
       PORT_RUN_ID: ${{ fromJson(inputs.port_context).runId }}
     
     steps:
-      - name: Report video processing start
-        uses: port-labs/port-github-action@v1
-        with:
-          clientId: ${{ secrets.PORT_CLIENT_ID }}
-          clientSecret: ${{ secrets.PORT_CLIENT_SECRET }}
-          operation: PATCH_RUN
-          runId: ${{ fromJson(inputs.port_context).runId }}
-          logMessage: "Starting video processing"
-          status: RUNNING
+      - name: Log video processing start
+        run: |
+          curl -X POST "https://api.getport.io/v1/actions/runs/$PORT_RUN_ID/logs" \
+            -H "Authorization: Bearer ${{ needs.initialize.outputs.access_token }}" \
+            -H "Content-Type: application/json" \
+            -d '{"message": "Starting video processing"}'
 
       - name: Process videos
         run: |
@@ -164,7 +152,7 @@ jobs:
               
               # Report progress every 10 videos
               if ((processed_count % 10 == 0)); then
-                curl -s -X POST "https://api.getport.io/v1/actions/runs/$PORT_RUN_ID/logs" \
+                curl -X POST "https://api.getport.io/v1/actions/runs/$PORT_RUN_ID/logs" \
                   -H "Authorization: Bearer ${{ needs.initialize.outputs.access_token }}" \
                   -H "Content-Type: application/json" \
                   -d "{\"message\": \"Processed $processed_count videos\"}"
@@ -176,7 +164,7 @@ jobs:
           done
 
           # Final progress report
-          curl -s -X POST "https://api.getport.io/v1/actions/runs/$PORT_RUN_ID/logs" \
+          curl -X POST "https://api.getport.io/v1/actions/runs/$PORT_RUN_ID/logs" \
             -H "Authorization: Bearer ${{ needs.initialize.outputs.access_token }}" \
             -H "Content-Type: application/json" \
             -d "{\"message\": \"Completed processing $processed_count videos\"}"
@@ -196,3 +184,4 @@ jobs:
           runId: ${{ fromJson(inputs.port_context).runId }}
           logMessage: "YouTube playlist ingestion complete"
           status: ${{ needs.process_playlist.result == 'success' && needs.process_videos.result == 'success' && 'SUCCESS' || 'FAILURE' }}
+          baseUrl: https://api.getport.io
