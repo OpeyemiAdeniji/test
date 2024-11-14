@@ -63,14 +63,15 @@ jobs:
               return 1
             fi
 
-            access_token=$(echo "$response" | jq -r '.accessToken // empty')
+            # Extract and trim any surrounding whitespace from the access token
+            access_token=$(echo "$response" | jq -r '.accessToken // empty' | xargs)
             if [ -z "$access_token" ]; then
               echo "Failed to retrieve access token. Response: $response"
               return 1
             fi
 
             echo "::set-output name=access_token::$access_token"
-            echo "DEBUG: Full access token: $access_token"  # Debug line, ensure to remove later
+            echo "DEBUG: Full access token (truncated): ${access_token:0:50}..."
             echo "$access_token"
           }
 
@@ -82,8 +83,13 @@ jobs:
 
           echo "Access token obtained: ${ACCESS_TOKEN:0:50}..."
 
-          # Removed JWT format validation
-          
+          # Validate the JWT format with trimming
+          trimmed_token=$(echo "$ACCESS_TOKEN" | xargs)
+          if ! [[ "$trimmed_token" =~ ^[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]+$ ]]; then
+            echo "Invalid JWT format detected. The token does not meet the structure of a JWT."
+            exit 1
+          fi
+
           # Fetch playlist details
           playlist_response=$(curl -s "https://www.googleapis.com/youtube/v3/playlists?part=snippet,contentDetails,status&id=${PLAYLIST_ID}&key=${YOUTUBE_API_KEY}")
           playlist_id=$(echo $playlist_response | jq -r '.items[0].id')
