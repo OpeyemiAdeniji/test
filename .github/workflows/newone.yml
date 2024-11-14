@@ -102,14 +102,19 @@ jobs:
     steps:
       - name: Push Playlist Data to Port
         run: |
-          playlist_entity='${{ needs.fetch_playlist_metadata.outputs.PLAYLIST_ENTITY }}'
+          playlist_entity=$(echo '${{ needs.fetch_playlist_metadata.outputs.PLAYLIST_ENTITY }}' | jq -c .)
 
-          response=$(curl --http1.1 -s -w "%{http_code}\n" -o /tmp/playlist_response.json -X POST "https://api.getport.io/v1/blueprints/playlist/entities?upsert=true" \
+          if ! echo "$playlist_entity" | jq . > /dev/null 2>&1; then
+            echo "Error: playlist_entity is not valid JSON. Exiting."
+            exit 1
+          fi
+
+          response=$(curl --http1.1 -s -w "%{http_code}" -o /tmp/playlist_response.json -X POST "https://api.getport.io/v1/blueprints/playlist/entities?upsert=true" \
             -H "Authorization: Bearer $ACCESS_TOKEN" \
             -H "Content-Type: application/json" \
             -d "$playlist_entity")
 
-          http_code=$(tail -n1 /tmp/playlist_response.json)
+          http_code=$(tail -c 3 /tmp/playlist_response.json)
           body=$(cat /tmp/playlist_response.json)
 
           echo "HTTP Response Code: $http_code"
@@ -185,14 +190,19 @@ jobs:
     steps:
       - name: Push Videos to Port
         run: |
-          video_entity='${{ needs.fetch_videos.outputs.VIDEO_ENTITY }}'
+          video_entity=$(echo '${{ needs.fetch_videos.outputs.VIDEO_ENTITY }}' | jq -c .)
 
-          response=$(curl --http1.1 -s -w "%{http_code}\n" -o /tmp/video_response.json -X POST "https://api.getport.io/v1/blueprints/video/entities?upsert=true" \
+          if ! echo "$video_entity" | jq . > /dev/null 2>&1; then
+            echo "Error: video_entity is not valid JSON. Exiting."
+            exit 1
+          fi
+
+          response=$(curl --http1.1 -s -w "%{http_code}" -o /tmp/video_response.json -X POST "https://api.getport.io/v1/blueprints/video/entities?upsert=true" \
             -H "Authorization: Bearer $ACCESS_TOKEN" \
             -H "Content-Type: application/json" \
             -d "$video_entity")
 
-          http_code=$(tail -n1 /tmp/video_response.json)
+          http_code=$(tail -c 3 /tmp/video_response.json)
           body=$(cat /tmp/video_response.json)
 
           echo "HTTP Response Code: $http_code"
