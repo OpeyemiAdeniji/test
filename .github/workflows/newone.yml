@@ -25,6 +25,8 @@ jobs:
     env:
       PORT_CLIENT_ID: ${{ secrets.PORT_CLIENT_ID }}
       PORT_CLIENT_SECRET: ${{ secrets.PORT_CLIENT_SECRET }}
+    outputs:
+      ACCESS_TOKEN: ${{ steps.get_token.outputs.ACCESS_TOKEN }}
     steps:
       - name: Fetch Port Access Token
         id: get_token
@@ -33,30 +35,25 @@ jobs:
           PORT_CLIENT_ID=$(echo "$PORT_CLIENT_ID" | xargs)
           PORT_CLIENT_SECRET=$(echo "$PORT_CLIENT_SECRET" | xargs)
 
-          get_port_access_token() {
-            response=$(curl -s -X POST "https://api.getport.io/v1/auth/access_token" \
-              -H "Content-Type: application/json" \
-              -d '{
-                "clientId": "'"$PORT_CLIENT_ID"'",
-                "clientSecret": "'"$PORT_CLIENT_SECRET"'"
-              }')
+          response=$(curl -s -X POST "https://api.getport.io/v1/auth/access_token" \
+            -H "Content-Type: application/json" \
+            -d '{
+              "clientId": "'"$PORT_CLIENT_ID"'",
+              "clientSecret": "'"$PORT_CLIENT_SECRET"'"
+            }')
 
-            if echo "$response" | grep -q '"ok":false'; then
-              echo "Error obtaining access token: $(echo "$response" | jq -r '.error')"
-              exit 1
-            fi
+          if echo "$response" | grep -q '"ok":false'; then
+            echo "Error obtaining access token: $(echo "$response" | jq -r '.error')"
+            exit 1
+          fi
 
-            access_token=$(echo "$response" | jq -r '.accessToken // empty')
-            if [ -z "$access_token" ]; then
-              echo "Failed to retrieve access token. Response: $response"
-              exit 1
-            fi
+          access_token=$(echo "$response" | jq -r '.accessToken // empty')
+          if [ -z "$access_token" ]; then
+            echo "Failed to retrieve access token. Response: $response"
+            exit 1
+          fi
 
-            echo "::set-output name=ACCESS_TOKEN::$access_token"
-          }
-
-          ACCESS_TOKEN=$(get_port_access_token)
-          echo "Access token obtained: ${ACCESS_TOKEN:0:50}..."
+          echo "::set-output name=ACCESS_TOKEN::$access_token"
 
   fetch_playlist_metadata:
     runs-on: ubuntu-latest
@@ -64,6 +61,8 @@ jobs:
     env:
       YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
       PLAYLIST_ID: ${{ inputs.playlistid }}
+    outputs:
+      PLAYLIST_ENTITY: ${{ steps.fetch_metadata.outputs.PLAYLIST_ENTITY }}
     steps:
       - name: Fetch YouTube Playlist Metadata
         id: fetch_metadata
@@ -75,11 +74,6 @@ jobs:
           playlist_thumbnail=$(echo $playlist_response | jq -r '.items[0].snippet.thumbnails.default.url')
           playlist_video_count=$(echo $playlist_response | jq -r '.items[0].contentDetails.itemCount')
           playlist_published_at=$(echo $playlist_response | jq -r '.items[0].snippet.publishedAt')
-
-          if [ -z "$playlist_id" ]; then
-            echo "Failed to fetch playlist details. Exiting."
-            exit 1
-          fi
 
           playlist_entity=$(jq -n --arg id "$playlist_id" --arg title "$playlist_title" \
             --arg description "$playlist_description" --arg thumbnailUrl "$playlist_thumbnail" \
@@ -98,7 +92,7 @@ jobs:
             }')
 
           echo "::set-output name=PLAYLIST_ENTITY::$playlist_entity"
-          echo "Playlist entity created: $playlist_entity"
+          echo "Playlist entity created successfully."
 
   push_playlist_to_port:
     runs-on: ubuntu-latest
@@ -110,17 +104,12 @@ jobs:
         run: |
           playlist_entity='${{ needs.fetch_playlist_metadata.outputs.PLAYLIST_ENTITY }}'
 
-          if [ -z "$playlist_entity" ] || [ "$playlist_entity" == "null" ]; then
-            echo "Error: playlist_entity is empty. Exiting."
-            exit 1
-          fi
-
           response=$(curl --http1.1 -s -w "%{http_code}\n" -o /tmp/playlist_response.json -X POST "https://api.getport.io/v1/blueprints/playlist/entities?upsert=true" \
             -H "Authorization: Bearer $ACCESS_TOKEN" \
             -H "Content-Type: application/json" \
             -d "$playlist_entity")
 
-          http_code=$(echo "$response" | head -c 1)
+          http_code=$(tail -n1 /tmp/playlist_response.json)
           body=$(cat /tmp/playlist_response.json)
 
           echo "HTTP Response Code: $http_code"
@@ -163,7 +152,7 @@ jobs:
                 --arg description "$video_description" --arg thumbnailUrl "$video_thumbnail" \
                 --arg duration "$video_duration" --argjson viewCount "$video_view_count" \
                 --argjson likeCount "$video_like_count" --argjson commentCount "$video_comment_count" \
-                --arg playlistId "$playlist_id" \
+                --arg playlistId "${{ needs.fetch_playlist_metadata.outputs.PLAYLIST_ENTITY }}" \
                 '{
                   identifier: $id,
                   title: $title,
@@ -198,17 +187,12 @@ jobs:
         run: |
           video_entity='${{ needs.fetch_videos.outputs.VIDEO_ENTITY }}'
 
-          if [ -z "$video_entity" ] || [ "$video_entity" == "null" ]; then
-            echo "Error: video_entity is empty. Exiting."
-            exit 1
-          fi
-
           response=$(curl --http1.1 -s -w "%{http_code}\n" -o /tmp/video_response.json -X POST "https://api.getport.io/v1/blueprints/video/entities?upsert=true" \
             -H "Authorization: Bearer $ACCESS_TOKEN" \
             -H "Content-Type: application/json" \
             -d "$video_entity")
 
-          http_code=$(echo "$response" | head -c 1)
+          http_code=$(tail -n1 /tmp/video_response.json)
           body=$(cat /tmp/video_response.json)
 
           echo "HTTP Response Code: $http_code"
