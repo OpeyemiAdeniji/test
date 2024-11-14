@@ -29,6 +29,7 @@ jobs:
           PORT_CLIENT_ID=$(echo "$PORT_CLIENT_ID" | xargs)
           PORT_CLIENT_SECRET=$(echo "$PORT_CLIENT_SECRET" | xargs)
 
+          # Function to get Port access token
           get_port_access_token() {
             response=$(curl -s -X POST "https://api.getport.io/v1/auth/access_token" \
               -H "Content-Type: application/json" \
@@ -62,8 +63,6 @@ jobs:
             exit 1
           fi
 
-          echo "ACCESS_TOKEN=$ACCESS_TOKEN" >> $GITHUB_ENV
-
   fetch_playlist_metadata:
     runs-on: ubuntu-latest
     env:
@@ -75,13 +74,14 @@ jobs:
       PLAYLIST_ID: ${{ steps.fetch_metadata.outputs.PLAYLIST_ID }}
       PLAYLIST_DATA: ${{ steps.fetch_metadata.outputs.PLAYLIST_DATA }}
     steps:
-      - name: Generate Access Token
+      - name: Generate and Validate Access Token
         id: token
         run: |
           set -e
           PORT_CLIENT_ID=$(echo "$PORT_CLIENT_ID" | xargs)
           PORT_CLIENT_SECRET=$(echo "$PORT_CLIENT_SECRET" | xargs)
 
+          # Function to get Port access token
           get_port_access_token() {
             response=$(curl -s -X POST "https://api.getport.io/v1/auth/access_token" \
               -H "Content-Type: application/json" \
@@ -89,6 +89,11 @@ jobs:
                 "clientId": "'"$PORT_CLIENT_ID"'",
                 "clientSecret": "'"$PORT_CLIENT_SECRET"'"
               }')
+
+            if echo "$response" | grep -q '"ok":false'; then
+              echo "Error obtaining access token: $(echo "$response" | jq -r '.error')"
+              return 1
+            fi
 
             access_token=$(echo "$response" | jq -r '.accessToken // empty')
             if [ -z "$access_token" ]; then
@@ -100,6 +105,16 @@ jobs:
           }
 
           ACCESS_TOKEN=$(get_port_access_token)
+          if [ -z "$ACCESS_TOKEN" ]; then
+            echo "Failed to obtain access token. Exiting."
+            exit 1
+          fi
+
+          if ! [[ "$ACCESS_TOKEN" =~ ^[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]+$ ]]; then
+            echo "Invalid JWT format detected. Please check the token generation."
+            exit 1
+          fi
+
           echo "ACCESS_TOKEN=$ACCESS_TOKEN" >> $GITHUB_ENV
 
       - name: Fetch YouTube Playlist Metadata
@@ -137,13 +152,14 @@ jobs:
       PORT_CLIENT_ID: ${{ secrets.PORT_CLIENT_ID }}
       PORT_CLIENT_SECRET: ${{ secrets.PORT_CLIENT_SECRET }}
     steps:
-      - name: Generate Access Token
+      - name: Generate and Validate Access Token
         id: token
         run: |
           set -e
           PORT_CLIENT_ID=$(echo "$PORT_CLIENT_ID" | xargs)
           PORT_CLIENT_SECRET=$(echo "$PORT_CLIENT_SECRET" | xargs)
 
+          # Function to get Port access token
           get_port_access_token() {
             response=$(curl -s -X POST "https://api.getport.io/v1/auth/access_token" \
               -H "Content-Type: application/json" \
@@ -151,6 +167,11 @@ jobs:
                 "clientId": "'"$PORT_CLIENT_ID"'",
                 "clientSecret": "'"$PORT_CLIENT_SECRET"'"
               }')
+
+            if echo "$response" | grep -q '"ok":false'; then
+              echo "Error obtaining access token: $(echo "$response" | jq -r '.error')"
+              return 1
+            fi
 
             access_token=$(echo "$response" | jq -r '.accessToken // empty')
             if [ -z "$access_token" ]; then
@@ -162,6 +183,16 @@ jobs:
           }
 
           ACCESS_TOKEN=$(get_port_access_token)
+          if [ -z "$ACCESS_TOKEN" ]; then
+            echo "Failed to obtain access token. Exiting."
+            exit 1
+          fi
+
+          if ! [[ "$ACCESS_TOKEN" =~ ^[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]+$ ]]; then
+            echo "Invalid JWT format detected. Please check the token generation."
+            exit 1
+          fi
+
           echo "ACCESS_TOKEN=$ACCESS_TOKEN" >> $GITHUB_ENV
 
       - name: Push Playlist Data to Port
@@ -196,13 +227,14 @@ jobs:
     outputs:
       VIDEOS_DATA: ${{ steps.process_videos.outputs.VIDEOS_DATA }}
     steps:
-      - name: Generate Access Token
+      - name: Generate and Validate Access Token
         id: token
         run: |
           set -e
           PORT_CLIENT_ID=$(echo "$PORT_CLIENT_ID" | xargs)
           PORT_CLIENT_SECRET=$(echo "$PORT_CLIENT_SECRET" | xargs)
 
+          # Function to get Port access token
           get_port_access_token() {
             response=$(curl -s -X POST "https://api.getport.io/v1/auth/access_token" \
               -H "Content-Type: application/json" \
@@ -210,6 +242,11 @@ jobs:
                 "clientId": "'"$PORT_CLIENT_ID"'",
                 "clientSecret": "'"$PORT_CLIENT_SECRET"'"
               }')
+
+            if echo "$response" | grep -q '"ok":false'; then
+              echo "Error obtaining access token: $(echo "$response" | jq -r '.error')"
+              return 1
+            fi
 
             access_token=$(echo "$response" | jq -r '.accessToken // empty')
             if [ -z "$access_token" ]; then
@@ -221,6 +258,16 @@ jobs:
           }
 
           ACCESS_TOKEN=$(get_port_access_token)
+          if [ -z "$ACCESS_TOKEN" ]; then
+            echo "Failed to obtain access token. Exiting."
+            exit 1
+          fi
+
+          if ! [[ "$ACCESS_TOKEN" =~ ^[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]+$ ]]; then
+            echo "Invalid JWT format detected. Please check the token generation."
+            exit 1
+          fi
+
           echo "ACCESS_TOKEN=$ACCESS_TOKEN" >> $GITHUB_ENV
 
       - name: Fetch and Process Videos
@@ -277,13 +324,14 @@ jobs:
       PORT_CLIENT_ID: ${{ secrets.PORT_CLIENT_ID }}
       PORT_CLIENT_SECRET: ${{ secrets.PORT_CLIENT_SECRET }}
     steps:
-      - name: Generate Access Token
+      - name: Generate and Validate Access Token
         id: token
         run: |
           set -e
           PORT_CLIENT_ID=$(echo "$PORT_CLIENT_ID" | xargs)
           PORT_CLIENT_SECRET=$(echo "$PORT_CLIENT_SECRET" | xargs)
-          
+
+          # Function to get Port access token
           get_port_access_token() {
             response=$(curl -s -X POST "https://api.getport.io/v1/auth/access_token" \
               -H "Content-Type: application/json" \
@@ -291,6 +339,11 @@ jobs:
                 "clientId": "'"$PORT_CLIENT_ID"'",
                 "clientSecret": "'"$PORT_CLIENT_SECRET"'"
               }')
+
+            if echo "$response" | grep -q '"ok":false'; then
+              echo "Error obtaining access token: $(echo "$response" | jq -r '.error')"
+              return 1
+            fi
 
             access_token=$(echo "$response" | jq -r '.accessToken // empty')
             if [ -z "$access_token" ]; then
@@ -302,34 +355,21 @@ jobs:
           }
 
           ACCESS_TOKEN=$(get_port_access_token)
+          if [ -z "$ACCESS_TOKEN" ]; then
+            echo "Failed to obtain access token. Exiting."
+            exit 1
+          fi
+
+          if ! [[ "$ACCESS_TOKEN" =~ ^[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]+$ ]]; then
+            echo "Invalid JWT format detected. Please check the token generation."
+            exit 1
+          fi
+
           echo "ACCESS_TOKEN=$ACCESS_TOKEN" >> $GITHUB_ENV
 
       - name: Push Videos to Port
         run: |
-          echo '${{ needs.fetch_videos.outputs.VIDEOS_DATA }}' > videos_data.json
+          videos_array=$(echo '${{ needs.fetch_videos.outputs.VIDEOS_DATA }}' | jq -r .)
           
-          jq -c '.[]' videos_data.json | while read -r video_entity; do
-            if [ -z "$video_entity" ]; then
-              echo "Warning: Empty video entity found, skipping"
-              continue
-            fi
-            
-            echo "Processing video entity: $(echo "$video_entity" | jq -r '.identifier')"
-            
-            response=$(curl -s -X POST "https://api.getport.io/v1/blueprints/video/entities?upsert=true" \
-              -H "Authorization: Bearer $ACCESS_TOKEN" \
-              -H "Content-Type: application/json" \
-              -d "$video_entity")
-
-            if ! echo "$response" | jq empty; then
-              echo "Error: Invalid JSON response for video"
-              echo "$response"
-              exit 1
-            fi
-
-            if [[ $(echo "$response" | jq -r '.ok // false') != "true" ]]; then
-              echo "Failed to push video to Port. Response:"
-              echo "$response" | jq '.'
-              exit 1
-            fi
-          done
+          echo "$videos_array" | jq -c '.[]' | while read -r video_entity; do
+            response=$(curl -s -X POST "https://api.getport.io/v1/bluep
