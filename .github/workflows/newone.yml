@@ -57,7 +57,7 @@ jobs:
                 clientId: $client_id,
                 clientSecret: $client_secret
               }')
-            
+
             response=$(curl -s -X POST "https://api.getport.io/v1/auth/access_token" \
               -H "Content-Type: application/json" \
               -d "$payload")
@@ -67,14 +67,8 @@ jobs:
               return 1
             fi
 
-            # Extract and trim access token
-            access_token=$(echo "$response" | jq -r '.accessToken // empty' | xargs)
-            if [ -z "$access_token" ]; then
-              echo "Failed to retrieve access token. Response: $response"
-              return 1
-            fi
-
-            echo "$access_token"
+            # Extract and trim access token, ensuring only the token is output
+            echo "$response" | jq -r '.accessToken // empty' | xargs
           }
 
           # Retrieve and validate access token
@@ -165,28 +159,4 @@ jobs:
               echo "Sending video entity to Port..."
               response=$(curl --http1.1 -s -w "\n%{http_code}" -X POST "https://api.getport.io/v1/blueprints/video/entities?upsert=true" \
                 -H "Authorization: Bearer $ACCESS_TOKEN" \
-                -H "Content-Type: application/json" \
-                -d "$video_entity")
-
-              http_code=$(echo "$response" | tail -n1)
-              body=$(echo "$response" | sed '$d')
-
-              echo "HTTP Response Code: $http_code"
-              echo "Response Body: $body"
-
-              if [[ ! "$http_code" =~ ^2[0-9][0-9]$ ]]; then
-                echo "Failed to push video to Port. HTTP code: $http_code"
-                echo "Response Body: $body"
-                continue
-              fi
-
-              echo "Successfully processed video: $video_id"
-            done
-
-            if [ -z "$next_page_token" ]; then
-              echo "No more pages to process"
-              break
-            fi
-          done
-
-          echo "Finished processing all videos"
+                -H "
