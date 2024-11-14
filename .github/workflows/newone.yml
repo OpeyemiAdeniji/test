@@ -75,6 +75,11 @@ jobs:
           playlist_video_count=$(echo $playlist_response | jq -r '.items[0].contentDetails.itemCount')
           playlist_published_at=$(echo $playlist_response | jq -r '.items[0].snippet.publishedAt')
 
+          if [ -z "$playlist_id" ]; then
+            echo "Failed to fetch playlist details. Exiting."
+            exit 1
+          fi
+
           playlist_entity=$(jq -n --arg id "$playlist_id" --arg title "$playlist_title" \
             --arg description "$playlist_description" --arg thumbnailUrl "$playlist_thumbnail" \
             --arg videoCount "$playlist_video_count" --arg created_at "$playlist_published_at" \
@@ -102,9 +107,16 @@ jobs:
     steps:
       - name: Push Playlist Data to Port
         run: |
-          playlist_entity=$(echo '${{ needs.fetch_playlist_metadata.outputs.PLAYLIST_ENTITY }}' | jq -c .)
+          playlist_entity='${{ needs.fetch_playlist_metadata.outputs.PLAYLIST_ENTITY }}'
 
-          if ! echo "$playlist_entity" | jq . > /dev/null 2>&1; then
+          if [ -z "$playlist_entity" ] || [ "$playlist_entity" == "null" ]; then
+            echo "Error: playlist_entity is empty or not valid. Exiting."
+            exit 1
+          fi
+
+          playlist_entity=$(echo "$playlist_entity" | jq -c .)
+
+          if [ $? -ne 0 ]; then
             echo "Error: playlist_entity is not valid JSON. Exiting."
             exit 1
           fi
@@ -192,8 +204,8 @@ jobs:
         run: |
           video_entity=$(echo '${{ needs.fetch_videos.outputs.VIDEO_ENTITY }}' | jq -c .)
 
-          if ! echo "$video_entity" | jq . > /dev/null 2>&1; then
-            echo "Error: video_entity is not valid JSON. Exiting."
+          if [ -z "$video_entity" ] || [ "$video_entity" == "null" ]; then
+            echo "Error: video_entity is empty or not valid. Exiting."
             exit 1
           fi
 
