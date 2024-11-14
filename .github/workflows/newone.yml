@@ -89,7 +89,10 @@ jobs:
           fi
 
           # Debug log: Output part of the access token for verification
-          echo "Access token retrieved: ${ACCESS_TOKEN:0:10}..."
+          echo "Access token retrieved: ${ACCESS_TOKEN:0:10}... (length: ${#ACCESS_TOKEN})"
+
+          # Ensure the token is being passed correctly
+          echo "Using Authorization header: Bearer ${ACCESS_TOKEN:0:5}*****"
 
           # Process playlist videos
           next_page_token=""
