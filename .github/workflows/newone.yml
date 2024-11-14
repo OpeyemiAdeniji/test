@@ -10,21 +10,23 @@ on:
         required: true
 
 jobs:
-  # Job to obtain the Port access token
-  obtain_token:
+  setup_environment:
     runs-on: ubuntu-latest
-    env:
-      PORT_CLIENT_ID: ${{ secrets.PORT_CLIENT_ID }}
-      PORT_CLIENT_SECRET: ${{ secrets.PORT_CLIENT_SECRET }}
-
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
       - name: Install jq for JSON processing
-        run: sudo apt-get install -y jq
+        run: sudo apt-get install jq
 
-      - name: Get Port access token
+  fetch_port_token:
+    runs-on: ubuntu-latest
+    needs: setup_environment
+    env:
+      PORT_CLIENT_ID: ${{ secrets.PORT_CLIENT_ID }}
+      PORT_CLIENT_SECRET: ${{ secrets.PORT_CLIENT_SECRET }}
+    steps:
+      - name: Fetch Port Access Token
         id: get_token
         run: |
           set -e
@@ -40,52 +42,33 @@ jobs:
               }')
 
             if echo "$response" | grep -q '"ok":false'; then
-              echo "Error obtaining access token: $(echo "$response" | jq -r '.message')"
+              echo "Error obtaining access token: $(echo "$response" | jq -r '.error')"
               exit 1
             fi
 
             access_token=$(echo "$response" | jq -r '.accessToken // empty')
             if [ -z "$access_token" ]; then
-              echo "Error: Failed to retrieve access token. Response: $response"
+              echo "Failed to retrieve access token. Response: $response"
               exit 1
             fi
 
-            echo "$access_token"
+            echo "::set-output name=ACCESS_TOKEN::$access_token"
           }
 
           ACCESS_TOKEN=$(get_port_access_token)
-
-          # Validate token format
-          if [[ -z "$ACCESS_TOKEN" ]]; then
-            echo "Error: Access token is empty. Please check client credentials."
-            exit 1
-          fi
-
-          if ! [[ "$ACCESS_TOKEN" =~ ^[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]+$ ]]; then
-            echo "Error: Invalid JWT format detected or empty token."
-            exit 1
-          fi
-
           echo "Access token obtained: ${ACCESS_TOKEN:0:50}..."
-          echo "::set-output name=access_token::$ACCESS_TOKEN"
 
-  # Job to process the playlist
-  process_playlist:
+  fetch_playlist_metadata:
     runs-on: ubuntu-latest
-    needs: obtain_token
+    needs: fetch_port_token
     env:
-      ACCESS_TOKEN: ${{ needs.obtain_token.outputs.access_token }}
       YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
       PLAYLIST_ID: ${{ inputs.playlistid }}
-
+      ACCESS_TOKEN: ${{ needs.fetch_port_token.outputs.ACCESS_TOKEN }}
     steps:
-      - name: Install jq for JSON processing
-        run: sudo apt-get install -y jq
-
-      - name: Fetch playlist details and report to Port
-        id: fetch_playlist
+      - name: Fetch YouTube Playlist Metadata
+        id: fetch_metadata
         run: |
-          set -e
           playlist_response=$(curl -s "https://www.googleapis.com/youtube/v3/playlists?part=snippet,contentDetails,status&id=${PLAYLIST_ID}&key=${YOUTUBE_API_KEY}")
           playlist_id=$(echo $playlist_response | jq -r '.items[0].id')
           playlist_title=$(echo $playlist_response | jq -r '.items[0].snippet.title')
@@ -110,13 +93,24 @@ jobs:
               }
             }')
 
-          echo "Payload: $playlist_entity"
+          echo "::set-output name=PLAYLIST_ENTITY::$playlist_entity"
+          echo "Playlist metadata fetched successfully."
+
+  push_playlist_to_port:
+    runs-on: ubuntu-latest
+    needs: fetch_playlist_metadata
+    env:
+      ACCESS_TOKEN: ${{ needs.fetch_port_token.outputs.ACCESS_TOKEN }}
+    steps:
+      - name: Push Playlist Data to Port
+        run: |
+          playlist_entity="${{ needs.fetch_playlist_metadata.outputs.PLAYLIST_ENTITY }}"
           response=$(curl --http1.1 -s -w "%{http_code}\n" -o /tmp/playlist_response.json -X POST "https://api.getport.io/v1/blueprints/playlist/entities?upsert=true" \
             -H "Authorization: Bearer $ACCESS_TOKEN" \
             -H "Content-Type: application/json" \
             -d "$playlist_entity")
 
-          http_code=$(cat /tmp/playlist_response.json | tail -n 1)
+          http_code=$(echo "$response" | head -c 1)
           body=$(cat /tmp/playlist_response.json)
 
           echo "HTTP Response Code: $http_code"
@@ -124,26 +118,20 @@ jobs:
 
           if [[ "$http_code" != "2" ]]; then
             echo "Failed to push playlist to Port. HTTP code: $http_code"
-            echo "Response Body: $body"
             exit 1
           fi
 
-  # Job to process videos in the playlist
-  process_videos:
+  fetch_videos:
     runs-on: ubuntu-latest
-    needs: process_playlist
+    needs: push_playlist_to_port
     env:
-      ACCESS_TOKEN: ${{ needs.obtain_token.outputs.access_token }}
       YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
       PLAYLIST_ID: ${{ inputs.playlistid }}
-
+      ACCESS_TOKEN: ${{ needs.fetch_port_token.outputs.ACCESS_TOKEN }}
     steps:
-      - name: Install jq for JSON processing
-        run: sudo apt-get install -y jq
-
-      - name: Fetch and process videos
+      - name: Fetch and Process Videos
+        id: process_videos
         run: |
-          set -e
           next_page_token=""
           while :; do
             url="https://www.googleapis.com/youtube/v3/playlistItems?part=snippet&maxResults=50&playlistId=${PLAYLIST_ID}&key=${YOUTUBE_API_KEY}${next_page_token:+&pageToken=$next_page_token}"
@@ -184,24 +172,33 @@ jobs:
                   }
                 }')
 
-              echo "Video Payload: $video_entity"
-              response=$(curl --http1.1 -s -w "%{http_code}\n" -o /tmp/video_response.json -X POST "https://api.getport.io/v1/blueprints/video/entities?upsert=true" \
-                -H "Authorization: Bearer $ACCESS_TOKEN" \
-                -H "Content-Type: application/json" \
-                -d "$video_entity")
-
-              http_code=$(cat /tmp/video_response.json | tail -n 1)
-              body=$(cat /tmp/video_response.json)
-
-              echo "HTTP Response Code: $http_code"
-              echo "Response Body: $body"
-
-              if [[ "$http_code" != "2" ]]; then
-                echo "Failed to push video to Port. HTTP code: $http_code"
-                echo "Response Body: $body"
-                exit 1
-              fi
+              echo "::set-output name=VIDEO_ENTITY::$video_entity"
             done
 
             [[ -z "$next_page_token" ]] && break
           done
+
+  push_videos_to_port:
+    runs-on: ubuntu-latest
+    needs: fetch_videos
+    env:
+      ACCESS_TOKEN: ${{ needs.fetch_port_token.outputs.ACCESS_TOKEN }}
+    steps:
+      - name: Push Videos to Port
+        run: |
+          video_entity="${{ needs.fetch_videos.outputs.VIDEO_ENTITY }}"
+          response=$(curl --http1.1 -s -w "%{http_code}\n" -o /tmp/video_response.json -X POST "https://api.getport.io/v1/blueprints/video/entities?upsert=true" \
+            -H "Authorization: Bearer $ACCESS_TOKEN" \
+            -H "Content-Type: application/json" \
+            -d "$video_entity")
+
+          http_code=$(echo "$response" | head -c 1)
+          body=$(cat /tmp/video_response.json)
+
+          echo "HTTP Response Code: $http_code"
+          echo "Response Body: $body"
+
+          if [[ "$http_code" != "2" ]]; then
+            echo "Failed to push video to Port. HTTP code: $http_code"
+            exit 1
+          fi
