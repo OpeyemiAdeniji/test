@@ -122,7 +122,7 @@ jobs:
           }')
 
           echo "PLAYLIST_ID=$playlist_id" >> $GITHUB_OUTPUT
-          echo "PLAYLIST_DATA=$(echo $playlist_data | jq -R -s .)" >> $GITHUB_OUTPUT
+          echo "PLAYLIST_DATA=$playlist_data" >> $GITHUB_OUTPUT
 
   push_playlist_to_port:
     runs-on: ubuntu-latest
@@ -149,12 +149,17 @@ jobs:
 
       - name: Push Playlist Data to Port
         run: |
-          playlist_entity=$(echo '${{ needs.fetch_playlist_metadata.outputs.PLAYLIST_DATA }}' | jq -r .)
+          playlist_entity='${{ needs.fetch_playlist_metadata.outputs.PLAYLIST_DATA }}'
           
-          curl -X POST "https://api.getport.io/v1/blueprints/playlist/entities?upsert=true" \
+          response=$(curl -s -w "%{http_code}" -X POST "https://api.getport.io/v1/blueprints/playlist/entities?upsert=true" \
             -H "Authorization: Bearer $ACCESS_TOKEN" \
             -H "Content-Type: application/json" \
-            -d "$playlist_entity"
+            -d "$playlist_entity")
+          
+          if [[ "${response: -3}" != "200" && "${response: -3}" != "201" ]]; then
+            echo "Failed to push playlist to Port. Response: $response"
+            exit 1
+          fi
 
   fetch_videos:
     runs-on: ubuntu-latest
@@ -165,7 +170,7 @@ jobs:
       YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
       PLAYLIST_ID: ${{ inputs.playlistid }}
     outputs:
-      videos_array: ${{ steps.process_videos.outputs.videos_array }}
+      VIDEOS_CHUNKS: ${{ steps.chunk_videos.outputs.CHUNKS }}
     steps:
       - name: Generate Access Token
         id: token
@@ -182,11 +187,11 @@ jobs:
       - name: Fetch and Process Videos
         id: process_videos
         run: |
-          # Initialize videos array
-          videos_array="["
-          separator=""
-          next_page_token=""
+          # Create a temporary file to store all video data
+          video_data_file=$(mktemp)
+          echo "[]" > "$video_data_file"
           
+          next_page_token=""
           while true; do
             # Fetch playlist items
             playlist_items_url="https://www.googleapis.com/youtube/v3/playlistItems?part=snippet&maxResults=50&playlistId=${PLAYLIST_ID}&key=${YOUTUBE_API_KEY}${next_page_token:+&pageToken=$next_page_token}"
@@ -199,7 +204,7 @@ jobs:
               # Fetch video details
               video_details=$(curl -s "https://www.googleapis.com/youtube/v3/videos?part=snippet,contentDetails,statistics&id=$video_id&key=${YOUTUBE_API_KEY}")
               
-              # Create video entity
+              # Create video entity and append to file
               video_json=$(echo $video_details | jq -c '.items[0] | {
                 identifier: .id,
                 title: .snippet.title,
@@ -218,8 +223,9 @@ jobs:
                 }
               }')
               
-              videos_array="${videos_array}${separator}${video_json}"
-              separator=","
+              # Append to the array in the file
+              content=$(cat "$video_data_file")
+              echo "$content" | jq --arg video "$video_json" '. + [$video | fromjson]' > "$video_data_file"
             done
             
             # Check for next page
@@ -227,26 +233,28 @@ jobs:
             [ -z "$next_page_token" ] && break
           done
           
-          # Close the array
-          videos_array="${videos_array}]"
-          
-          # Save the videos array as output
-          echo "videos_array=$(echo $videos_array | jq -R -s .)" >> $GITHUB_OUTPUT
+          # Save the complete video data file
+          echo "VIDEO_DATA_FILE=$video_data_file" >> $GITHUB_ENV
+
+      - name: Chunk Videos
+        id: chunk_videos
+        run: |
+          # Read the complete video data and split into chunks of 10
+          chunks=$(cat $VIDEO_DATA_FILE | jq -c '. | _nwise(10)')
+          echo "CHUNKS=$chunks" >> $GITHUB_OUTPUT
 
   push_videos_to_port:
     runs-on: ubuntu-latest
     needs: fetch_videos
+    strategy:
+      matrix:
+        chunk: ${{ fromJson(needs.fetch_videos.outputs.VIDEOS_CHUNKS) }}
     env:
       PORT_CLIENT_ID: ${{ secrets.PORT_CLIENT_ID }}
       PORT_CLIENT_SECRET: ${{ secrets.PORT_CLIENT_SECRET }}
     steps:
-      - name: Generate and Validate Access Token
-        id: token
+      - name: Generate Access Token
         run: |
-          set -e
-          PORT_CLIENT_ID=$(echo "$PORT_CLIENT_ID" | xargs)
-          PORT_CLIENT_SECRET=$(echo "$PORT_CLIENT_SECRET" | xargs)
-          
           ACCESS_TOKEN=$(curl -s -X POST "https://api.getport.io/v1/auth/access_token" \
             -H "Content-Type: application/json" \
             -d '{
@@ -258,16 +266,16 @@ jobs:
 
       - name: Push Videos to Port
         run: |
-          # Get videos array from previous job
-          videos_data=$(echo '${{ needs.fetch_videos.outputs.videos_array }}' | jq -r .)
-          
-          # Process each video
-          echo "$videos_data" | jq -c '.[]' | while read -r video; do
-            # Push to Port
-            curl -X POST "https://api.getport.io/v1/blueprints/video/entities?upsert=true" \
+          echo '${{ matrix.chunk }}' | jq -c '.[]' | while read -r video; do
+            response=$(curl -s -w "%{http_code}" -X POST "https://api.getport.io/v1/blueprints/video/entities?upsert=true" \
               -H "Authorization: Bearer $ACCESS_TOKEN" \
               -H "Content-Type: application/json" \
-              -d "$video"
+              -d "$video")
+            
+            if [[ "${response: -3}" != "200" && "${response: -3}" != "201" ]]; then
+              echo "Failed to push video to Port. Response: $response"
+              exit 1
+            fi
             
             # Add small delay to prevent rate limiting
             sleep 1
