@@ -28,44 +28,36 @@ jobs:
         id: get_token
         run: |
           set -e
+          echo "Starting token retrieval..."
+          
           PORT_CLIENT_ID=$(echo "$PORT_CLIENT_ID" | xargs)
           PORT_CLIENT_SECRET=$(echo "$PORT_CLIENT_SECRET" | xargs)
 
-          get_port_access_token() {
-            response=$(curl -s -X POST "https://api.getport.io/v1/auth/access_token" \
-              -H "Content-Type: application/json" \
-              -d '{
-                "clientId": "'"$PORT_CLIENT_ID"'",
-                "clientSecret": "'"$PORT_CLIENT_SECRET"'"
-              }')
+          # Get the token
+          response=$(curl -s -X POST "https://api.getport.io/v1/auth/access_token" \
+            -H "Content-Type: application/json" \
+            -d '{
+              "clientId": "'"$PORT_CLIENT_ID"'",
+              "clientSecret": "'"$PORT_CLIENT_SECRET"'"
+            }')
 
-            if echo "$response" | grep -q '"ok":false'; then
-              echo "Error obtaining access token: $(echo "$response" | jq -r '.message')"
-              exit 1
-            fi
-
-            access_token=$(echo "$response" | jq -r '.accessToken // empty')
-            if [ -z "$access_token" ]; then
-              echo "Error: Failed to retrieve access token. Response: $response"
-              exit 1
-            fi
-
-            echo "$access_token"
-          }
-
-          ACCESS_TOKEN=$(get_port_access_token)
-
-          # Debug output for token validation (remove or secure for production)
-          echo "Debug - Full Access Token: $ACCESS_TOKEN"
-
-          # Validate token format
-          if [[ -z "$ACCESS_TOKEN" ]]; then
-            echo "Error: Access token is empty. Please check client credentials."
+          # Check for errors in the response
+          if echo "$response" | grep -q '"ok":false'; then
+            echo "Error obtaining access token: $(echo "$response" | jq -r '.message')"
             exit 1
           fi
 
+          ACCESS_TOKEN=$(echo "$response" | jq -r '.accessToken // empty')
+
+          # Check if token is empty
+          if [ -z "$ACCESS_TOKEN" ]; then
+            echo "Error: Failed to retrieve access token. Response: $response"
+            exit 1
+          fi
+
+          # Validate token format
           if ! [[ "$ACCESS_TOKEN" =~ ^[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]+$ ]]; then
-            echo "Error: Invalid JWT format detected or empty token."
+            echo "Error: Invalid JWT format detected."
             exit 1
           fi
 
@@ -85,12 +77,11 @@ jobs:
       - name: Install jq for JSON processing
         run: sudo apt-get install -y jq
 
-      - name: Fetch playlist details and report to Port
-        id: fetch_playlist
+      - name: Debug - Check access token
         run: |
           set -e
           echo "Debug - Access Token before request: ${ACCESS_TOKEN:0:50}..."
-
+          
           # Validate the token before usage
           if [[ -z "$ACCESS_TOKEN" ]]; then
             echo "Error: Access token is empty. Verify that the token is properly set."
@@ -102,6 +93,10 @@ jobs:
             exit 1
           fi
 
+      - name: Fetch playlist details and report to Port
+        id: fetch_playlist
+        run: |
+          set -e
           playlist_response=$(curl -s "https://www.googleapis.com/youtube/v3/playlists?part=snippet,contentDetails,status&id=${PLAYLIST_ID}&key=${YOUTUBE_API_KEY}")
           playlist_id=$(echo $playlist_response | jq -r '.items[0].id')
           playlist_title=$(echo $playlist_response | jq -r '.items[0].snippet.title')
@@ -157,7 +152,7 @@ jobs:
       - name: Install jq for JSON processing
         run: sudo apt-get install -y jq
 
-      - name: Fetch and process videos
+      - name: Debug - Check access token before video processing
         run: |
           set -e
           echo "Debug - Access Token before processing videos: ${ACCESS_TOKEN:0:50}..."
@@ -173,6 +168,9 @@ jobs:
             exit 1
           fi
 
+      - name: Fetch and process videos
+        run: |
+          set -e
           next_page_token=""
           while :; do
             url="https://www.googleapis.com/youtube/v3/playlistItems?part=snippet&maxResults=50&playlistId=${PLAYLIST_ID}&key=${YOUTUBE_API_KEY}${next_page_token:+&pageToken=$next_page_token}"
