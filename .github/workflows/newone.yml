@@ -30,7 +30,7 @@ jobs:
           set -e
           PORT_CLIENT_ID=$(echo "$PORT_CLIENT_ID" | xargs)
           PORT_CLIENT_SECRET=$(echo "$PORT_CLIENT_SECRET" | xargs)
-          
+
           get_port_access_token() {
             response=$(curl -s -X POST "https://api.getport.io/v1/auth/access_token" \
               -H "Content-Type: application/json" \
@@ -38,15 +38,15 @@ jobs:
                 "clientId": "'"$PORT_CLIENT_ID"'",
                 "clientSecret": "'"$PORT_CLIENT_SECRET"'"
               }')
-            
+
             if echo "$response" | grep -q '"ok":false'; then
-              echo "Error obtaining access token: $(echo "$response" | jq -r '.error' )"
+              echo "Error obtaining access token: $(echo "$response" | jq -r '.message')"
               exit 1
             fi
 
             access_token=$(echo "$response" | jq -r '.accessToken // empty')
             if [ -z "$access_token" ]; then
-              echo "Failed to retrieve access token. Response: $response"
+              echo "Error: Failed to retrieve access token. Response: $response"
               exit 1
             fi
 
@@ -55,9 +55,14 @@ jobs:
 
           ACCESS_TOKEN=$(get_port_access_token)
 
-          # Verify token format and print for debugging
-          if [[ -z "$ACCESS_TOKEN" || ! "$ACCESS_TOKEN" =~ ^[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]+$ ]]; then
-            echo "Invalid JWT format detected or empty token. Please verify the token generation process."
+          # Validate token format
+          if [[ -z "$ACCESS_TOKEN" ]]; then
+            echo "Error: Access token is empty. Please check client credentials."
+            exit 1
+          fi
+
+          if ! [[ "$ACCESS_TOKEN" =~ ^[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]+$ ]]; then
+            echo "Error: Invalid JWT format detected or empty token."
             exit 1
           fi
 
