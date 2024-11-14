@@ -280,6 +280,24 @@ jobs:
             }' | jq -r '.accessToken')
           
           echo "ACCESS_TOKEN=$ACCESS_TOKEN" >> $GITHUB_ENV
+          
+      - name: Testing logs
+        id: push_video_logs
+        run: |
+          set -e
+
+          # Extract Port Run ID
+          PORT_RUN_ID=$(echo '${{ inputs.port_context }}' | jq -r '.runId')
+          echo "Port Run ID: $PORT_RUN_ID"
+          
+          curl -L "https://api.getport.io/v1/actions/runs/$PORT_RUN_ID/logs" \
+            -H "Content-Type: application/json" \
+            -H "Authorization: Bearer $ACCESS_TOKEN" \
+            -d '{
+              "message": "Workflow step completed successfully",
+              "terminationStatus": "SUCCESS",
+              "statusLabel": "Step finished"
+            }'
 
       - name: Push Videos to Port
         run: |
@@ -297,28 +315,13 @@ jobs:
             status_code=${response: -3}
             response_body=${response%???}
             
-            echo "MESSAGE=Successfully pushed video to Port" >> $GITHUB_OUTPUT
-
+            if [[ "$status_code" != "200" && "$status_code" != "201" ]]; then
+              echo "Failed to push video to Port. Status code: $status_code"
+              echo "Response body: $response_body"
+              exit 1
+            fi
+            
+            echo "Successfully pushed video to Port"
             # Add small delay to prevent rate limiting
             sleep 1
           done
-
-      - name: Testing logs
-        id: push_video_logs
-        run: |
-          set -e
-
-          # Extract Port Run ID
-          PORT_RUN_ID=$(echo '${{ inputs.port_context }}' | jq -r '.runId')
-          echo "Port Run ID: $PORT_RUN_ID"
-
-          MESSAGE="${{ steps.export.outputs.MESSAGE }}"
-          
-          curl -L "https://api.getport.io/v1/actions/runs/$PORT_RUN_ID/logs" \
-            -H "Content-Type: application/json" \
-            -H "Authorization: Bearer $ACCESS_TOKEN" \
-            -d '{
-              "message": MESSAGE,
-              "terminationStatus": "SUCCESS",
-              "statusLabel": "Step finished"
-            }'
