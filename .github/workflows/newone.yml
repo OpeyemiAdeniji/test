@@ -295,7 +295,7 @@ jobs:
             -H "Authorization: Bearer $ACCESS_TOKEN" \
             -d '{
               "message": "Workflow step completed successfully",
-              "terminationStatus": "",
+              "terminationStatus": "SUCCESS",
               "statusLabel": "Step finished"
             }'
 
