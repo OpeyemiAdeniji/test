@@ -238,6 +238,8 @@ jobs:
           escaped_array=$(echo "$videos_array" | jq -R -s .)
           echo "videos_array=$escaped_array" >> $GITHUB_OUTPUT
 
+  # Previous jobs remain the same until push_videos_to_port...
+
   push_videos_to_port:
     runs-on: ubuntu-latest
     needs: fetch_videos
@@ -245,33 +247,24 @@ jobs:
       PORT_CLIENT_ID: ${{ secrets.PORT_CLIENT_ID }}
       PORT_CLIENT_SECRET: ${{ secrets.PORT_CLIENT_SECRET }}
     steps:
-      - name: Generate Access Token
+      - name: Generate and Validate Access Token
         id: token
         run: |
-          TOKEN=$(curl -s -X POST "https://api.getport.io/v1/auth/access_token" \
-            -H "Content-Type: application/json" \
-            -d "{\"clientId\": \"$PORT_CLIENT_ID\", \"clientSecret\": \"$PORT_CLIENT_SECRET\"}")
+          set -e
+          PORT_CLIENT_ID=$(echo "$PORT_CLIENT_ID" | xargs)
+          PORT_CLIENT_SECRET=$(echo "$PORT_CLIENT_SECRET" | xargs)
           
-          ACCESS_TOKEN=$(echo "$TOKEN" | jq -r '.accessToken')
-          if [ -z "$ACCESS_TOKEN" ] || [ "$ACCESS_TOKEN" = "null" ]; then
-            echo "::error::Failed to get access token"
-            exit 1
-          fi
+          ACCESS_TOKEN=$(curl -s -X POST "https://api.getport.io/v1/auth/access_token" \
+            -H "Content-Type: application/json" \
+            -d '{
+              "clientId": "'"$PORT_CLIENT_ID"'",
+              "clientSecret": "'"$PORT_CLIENT_SECRET"'"
+            }' | jq -r '.accessToken')
+          
           echo "ACCESS_TOKEN=$ACCESS_TOKEN" >> $GITHUB_ENV
 
       - name: Push Videos to Port
         run: |
-          TOKEN=$(curl -s -X POST "https://api.getport.io/v1/auth/access_token" \
-            -H "Content-Type: application/json" \
-            -d "{\"clientId\": \"$PORT_CLIENT_ID\", \"clientSecret\": \"$PORT_CLIENT_SECRET\"}")
-          
-          ACCESS_TOKEN=$(echo "$TOKEN" | jq -r '.accessToken')
-          if [ -z "$ACCESS_TOKEN" ] || [ "$ACCESS_TOKEN" = "null" ]; then
-            echo "::error::Failed to get access token"
-            exit 1
-          fi
-          echo "ACCESS_TOKEN=$ACCESS_TOKEN" >> $GITHUB_ENV
-
           # Parse the videos array
           videos_data=$(echo '${{ needs.fetch_videos.outputs.videos_array }}' | jq -r .)
           
