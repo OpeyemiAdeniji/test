@@ -104,33 +104,56 @@ jobs:
     env:
       YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
       PORT_RUN_ID: ${{ fromJson(inputs.port_context).runId }}
+      ACCESS_TOKEN: ${{ needs.initialize.outputs.access_token }}
     
     steps:
       - name: Log video processing start
         run: |
           curl -X POST "https://api.getport.io/v1/actions/runs/$PORT_RUN_ID/logs" \
-            -H "Authorization: Bearer ${{ needs.initialize.outputs.access_token }}" \
+            -H "Authorization: Bearer $ACCESS_TOKEN" \
             -H "Content-Type: application/json" \
             -d '{"message": "Starting video processing"}'
 
-      - name: Process videos
+      - name: Get playlist items
+        id: playlist_items
         run: |
           next_page_token=""
-          processed_count=0
+          echo "VIDEO_IDS=" >> $GITHUB_ENV
           
           while :; do
             url="https://www.googleapis.com/youtube/v3/playlistItems?part=snippet&maxResults=50&playlistId=${{ inputs.playlistid }}&key=${{ env.YOUTUBE_API_KEY }}${next_page_token:+&pageToken=$next_page_token}"
             response=$(curl -s "$url")
             
-            # Process each video
-            echo "$response" | jq -r '.items[].snippet.resourceId.videoId' | while read -r video_id; do
-              video_details=$(curl -s "https://www.googleapis.com/youtube/v3/videos?part=snippet,contentDetails,statistics&id=$video_id&key=${{ env.YOUTUBE_API_KEY }}")
-              
-              # Create video entity
-              video_entity=$(echo "$video_details" | jq -r --arg playlist_id "${{ inputs.playlistid }}" '.items[0] | {
-                identifier: .id,
-                title: .snippet.title,
-                properties: {
+            # Collect video IDs
+            video_ids=$(echo "$response" | jq -r '.items[].snippet.resourceId.videoId' | tr '\n' ',')
+            echo "VIDEO_IDS=${VIDEO_IDS}${video_ids}" >> $GITHUB_ENV
+            
+            next_page_token=$(echo "$response" | jq -r '.nextPageToken // empty')
+            [ -z "$next_page_token" ] && break
+          done
+
+      - name: Process videos
+        run: |
+          # Remove trailing comma and split into array
+          IFS=',' read -ra video_array <<< "${VIDEO_IDS%,}"
+          total_videos=${#video_array[@]}
+          processed_count=0
+          
+          for video_id in "${video_array[@]}"; do
+            # Log video processing start
+            curl -X POST "https://api.getport.io/v1/actions/runs/$PORT_RUN_ID/logs" \
+              -H "Authorization: Bearer $ACCESS_TOKEN" \
+              -H "Content-Type: application/json" \
+              -d "{\"message\": \"Processing video $((processed_count + 1)) of $total_videos\"}"
+            
+            # Fetch video details
+            video_response=$(curl -s "https://www.googleapis.com/youtube/v3/videos?part=snippet,contentDetails,statistics&id=$video_id&key=${{ env.YOUTUBE_API_KEY }}")
+            
+            # Create video entity
+            video_entity=$(echo "$video_response" | jq -r --arg playlist_id "${{ inputs.playlistid }}" '.items[0] | {
+              identifier: .id,
+              title: .snippet.title,
+              properties: {
                   videoId: .id,
                   title: .snippet.title,
                   duration: .contentDetails.duration,
@@ -140,29 +163,28 @@ jobs:
                 relations: {
                   belongs_to_playlist: $playlist_id
                 }
-              }')
+            }')
 
-              # Upload to Port
-              curl -s -X POST "https://api.getport.io/v1/blueprints/video/entities?upsert=true" \
-                -H "Authorization: Bearer ${{ needs.initialize.outputs.access_token }}" \
-                -H "Content-Type: application/json" \
-                -d "$video_entity"
-
-              ((processed_count++))
-              
-              # Report progress every 10 videos
-              if ((processed_count % 10 == 0)); then
-                curl -X POST "https://api.getport.io/v1/actions/runs/$PORT_RUN_ID/logs" \
-                  -H "Authorization: Bearer ${{ needs.initialize.outputs.access_token }}" \
-                  -H "Content-Type: application/json" \
-                  -d "{\"message\": \"Processed $processed_count videos\"}"
-              fi
-            done
-
-            next_page_token=$(echo "$response" | jq -r '.nextPageToken // empty')
-            [ -z "$next_page_token" ] && break
+            # Create video in Port
+            response=$(curl -s -X POST "https://api.getport.io/v1/blueprints/video/entities?upsert=true" \
+              -H "Authorization: Bearer $ACCESS_TOKEN" \
+              -H "Content-Type: application/json" \
+              -d "$video_entity")
+            
+            # Log video creation
+            curl -X POST "https://api.getport.io/v1/actions/runs/$PORT_RUN_ID/logs" \
+              -H "Authorization: Bearer $ACCESS_TOKEN" \
+              -H "Content-Type: application/json" \
+              -d "{\"message\": \"Created video entity: $(echo "$video_response" | jq -r '.items[0].snippet.title')\"}"
+            
+            ((processed_count++))
           done
-
+          
+          # Final progress report
+          curl -X POST "https://api.getport.io/v1/actions/runs/$PORT_RUN_ID/logs" \
+            -H "Authorization: Bearer $ACCESS_TOKEN" \
+            -H "Content-Type: application/json" \
+            -d "{\"message\": \"Completed processing $processed_count videos\"}"
 
   finalize:
     needs: [process_playlist, process_videos]
