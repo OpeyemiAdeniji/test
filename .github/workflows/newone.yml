@@ -65,6 +65,13 @@ jobs:
           # Parse the port_context input and extract run ID
           PORT_RUN_ID=$(echo '${{ inputs.port_context }}' | jq -r '.runId')
           echo "Port Run ID: $PORT_RUN_ID"
+
+          ACCESS_TOKEN=$(curl -s -X POST "https://api.getport.io/v1/auth/access_token" \
+            -H "Content-Type: application/json" \
+            -d '{
+              "clientId": "'"$PORT_CLIENT_ID"'",
+              "clientSecret": "'"$PORT_CLIENT_SECRET"'"
+            }' | jq -r '.accessToken')
       
           # Use the ACCESS_TOKEN we generated in the previous step
           curl -L "https://api.getport.io/v1/actions/runs/$PORT_RUN_ID/logs" \
@@ -72,10 +79,10 @@ jobs:
             -H "Authorization: Bearer $ACCESS_TOKEN" \
             -d '{
               "message": "Hello from the other side!!!",
-              "terminationStatus": "SUCCESS",
-              "statusLabel": "Running"
+              "terminationStatus": "",
+              "statusLabel": ""
             }'
-          
+         
 
           if ! [[ "$ACCESS_TOKEN" =~ ^[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]+$ ]]; then
             echo "Invalid JWT format detected. Please check the token generation."
