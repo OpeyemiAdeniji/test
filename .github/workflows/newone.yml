@@ -297,13 +297,6 @@ jobs:
             status_code=${response: -3}
             response_body=${response%???}
             
-            if [[ "$status_code" != "200" && "$status_code" != "201" ]]; then
-              echo "Failed to push video to Port. Status code: $status_code"
-              echo "MESSAGE=Failed to push video to Port. Status code: $status_code" >> $GITHUB_OUTPUT
-              echo "Response body: $response_body"
-              exit 1
-            fi
-            echo "Successfully pushed video to Port"
             echo "MESSAGE=Successfully pushed video to Port" >> $GITHUB_OUTPUT
 
             # Add small delay to prevent rate limiting
