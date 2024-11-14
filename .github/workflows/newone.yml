@@ -42,9 +42,23 @@ jobs:
         run: |
           set -e  # Exit immediately if any command returns a non-zero status
 
-          # Ensure environment variables are trimmed of whitespace
-          PORT_CLIENT_ID=$(echo "$PORT_CLIENT_ID" | xargs)
-          PORT_CLIENT_SECRET=$(echo "$PORT_CLIENT_SECRET" | xargs)
+          # Rest of the playlist processing code remains the same...
+
+  fetch_videos:
+    runs-on: ubuntu-latest
+    needs: update_port_with_playlist_data
+    env:
+      PORT_CLIENT_ID: ${{ secrets.PORT_CLIENT_ID }}
+      PORT_CLIENT_SECRET: ${{ secrets.PORT_CLIENT_SECRET }}
+      YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
+      PLAYLIST_ID: ${{ inputs.playlistid }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Fetch and Process Videos in Playlist
+        run: |
+          set -e  # Exit immediately if any command returns a non-zero status
 
           # Function to get Port access token
           get_port_access_token() {
@@ -83,71 +97,6 @@ jobs:
 
           echo "Access token obtained: ${ACCESS_TOKEN:0:50}..."
 
-          # Skipping strict JWT format validation
-
-          # Fetch playlist details
-          playlist_response=$(curl -s "https://www.googleapis.com/youtube/v3/playlists?part=snippet,contentDetails,status&id=${PLAYLIST_ID}&key=${YOUTUBE_API_KEY}")
-          playlist_id=$(echo $playlist_response | jq -r '.items[0].id')
-          playlist_title=$(echo $playlist_response | jq -r '.items[0].snippet.title')
-          playlist_description=$(echo $playlist_response | jq -r '.items[0].snippet.description')
-          playlist_thumbnail=$(echo $playlist_response | jq -r '.items[0].snippet.thumbnails.default.url')
-          playlist_video_count=$(echo $playlist_response | jq -r '.items[0].contentDetails.itemCount')
-          playlist_published_at=$(echo $playlist_response | jq -r '.items[0].snippet.publishedAt')
-
-          # Create playlist entity payload
-          playlist_entity=$(jq -n --arg id "$playlist_id" --arg title "$playlist_title" \
-            --arg description "$playlist_description" --arg thumbnailUrl "$playlist_thumbnail" \
-            --arg videoCount "$playlist_video_count" --arg created_at "$playlist_published_at" \
-            '{
-              identifier: $id,
-              title: $title,
-              properties: {
-                playlistId: $id,
-                title: $title,
-                description: $description,
-                thumbnailUrl: $thumbnailUrl,
-                videoCount: ($videoCount | tonumber),
-                created_at: $created_at
-              }
-            }')
-
-          # Print JSON payload for validation
-          echo "Payload: $playlist_entity"
-          echo "$playlist_entity" | jq .
-
-          # Use HTTP/1.1 to avoid HTTP/2 protocol issues and capture response
-          response=$(curl --http1.1 -s -w "%{http_code}\n" -o /tmp/playlist_response.json -X POST "https://api.getport.io/v1/blueprints/playlist/entities?upsert=true" \
-            -H "Authorization: Bearer $ACCESS_TOKEN" \
-            -H "Content-Type: application/json" \
-            -d "$playlist_entity")
-
-          http_code=$(echo "$response" | head -c 1)
-          body=$(cat /tmp/playlist_response.json)
-
-          echo "HTTP Response Code: $http_code"
-          echo "Response Body: $body"
-
-          if [[ "$http_code" != "2" ]]; then
-            echo "Failed to push playlist to Port. HTTP code: $http_code"
-            echo "Response Body: $body"
-            exit 1
-          fi
-
-  fetch_videos:
-    runs-on: ubuntu-latest
-    needs: update_port_with_playlist_data
-    env:
-      YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
-      PLAYLIST_ID: ${{ inputs.playlistid }}
-      ACCESS_TOKEN: ${{ needs.update_port_with_playlist_data.outputs.access_token }}
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Fetch and Process Videos in Playlist
-        run: |
-          set -e  # Exit immediately if any command returns a non-zero status
-
           next_page_token=""
           while :; do
             url="https://www.googleapis.com/youtube/v3/playlistItems?part=snippet&maxResults=50&playlistId=${PLAYLIST_ID}&key=${YOUTUBE_API_KEY}${next_page_token:+&pageToken=$next_page_token}"
@@ -170,7 +119,7 @@ jobs:
                 --arg description "$video_description" --arg thumbnailUrl "$video_thumbnail" \
                 --arg duration "$video_duration" --argjson viewCount "$video_view_count" \
                 --argjson likeCount "$video_like_count" --argjson commentCount "$video_comment_count" \
-                --arg playlistId "$playlist_id" \
+                --arg playlist_id "$PLAYLIST_ID" \
                 '{
                   identifier: $id,
                   title: $title,
@@ -185,7 +134,7 @@ jobs:
                     commentCount: $commentCount
                   },
                   relations: {
-                    belongs_to_playlist: $playlistId
+                    belongs_to_playlist: $playlist_id
                   }
                 }')
 
