@@ -40,7 +40,7 @@ jobs:
 
       - name: Fetch and Process YouTube Playlist Data
         run: |
-          set -e  # Exit immediately if any command returns a non-zero status
+          set -e
           echo "Starting playlist processing..."
 
   fetch_videos:
@@ -59,21 +59,27 @@ jobs:
         run: |
           # Enable error handling and debugging
           set -e
-          set -x  # Print commands for debugging
+          set -x
 
-          # Function to get Port access token
+          # Function to get Port access token with proper JSON escaping
           get_port_access_token() {
             echo "Requesting Port access token..."
+            # Create JSON payload using jq to ensure proper escaping
+            payload=$(jq -n \
+              --arg client_id "$PORT_CLIENT_ID" \
+              --arg client_secret "$PORT_CLIENT_SECRET" \
+              '{
+                clientId: $client_id,
+                clientSecret: $client_secret
+              }')
+            
             response=$(curl -s -X POST "https://api.getport.io/v1/auth/access_token" \
               -H "Content-Type: application/json" \
-              -d '{
-                "clientId": "'"$PORT_CLIENT_ID"'",
-                "clientSecret": "'"$PORT_CLIENT_SECRET"'"
-              }')
+              -d "$payload")
 
             # Check if the response contains an error
-            if echo "$response" | grep -q '"ok":false'; then
-              echo "Error obtaining access token: $(echo "$response" | jq -r '.error' )"
+            if echo "$response" | jq -e '.ok == false' > /dev/null; then
+              echo "Error obtaining access token: $(echo "$response" | jq -r '.error // .message // "Unknown error"')"
               return 1
             fi
 
@@ -139,7 +145,7 @@ jobs:
               if ! echo "$video_details" | jq -e '.items[0]' > /dev/null; then
                 echo "Error fetching video details for $video_id: $(echo "$video_details" | jq -r '.error.message // "Unknown error"')"
                 continue
-              }
+              fi
 
               # Extract video details with proper error handling
               video_title=$(echo "$video_details" | jq -r '.items[0].snippet.title')
@@ -151,7 +157,8 @@ jobs:
               video_comment_count=$(echo "$video_details" | jq -r '.items[0].statistics.commentCount // "0"')
 
               echo "Creating video entity payload..."
-              video_entity=$(jq -n --arg id "$video_id" \
+              video_entity=$(jq -n \
+                --arg id "$video_id" \
                 --arg title "$video_title" \
                 --arg description "$video_description" \
                 --arg thumbnailUrl "$video_thumbnail" \
@@ -193,7 +200,6 @@ jobs:
               if [[ ! "$http_code" =~ ^2[0-9][0-9]$ ]]; then
                 echo "Failed to push video to Port. HTTP code: $http_code"
                 echo "Response Body: $body"
-                # Continue with next video instead of exiting
                 continue
               fi
 
