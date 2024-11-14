@@ -14,7 +14,7 @@ jobs:
   initialize:
     runs-on: ubuntu-latest
     outputs:
-      access_token: ${{ steps.get_token.outputs.token }}
+      access_token: ${{ steps.get_token.outputs.access_token }}
     env:
       PORT_CLIENT_ID: ${{ secrets.PORT_CLIENT_ID }}
       PORT_CLIENT_SECRET: ${{ secrets.PORT_CLIENT_SECRET }}
@@ -31,19 +31,15 @@ jobs:
       - name: Get Port access token
         id: get_token
         run: |
-          response=$(curl -s -X POST "https://api.getport.io/v1/auth/access_token" \
+          token=$(curl -s -X POST "https://api.getport.io/v1/auth/access_token" \
             -H "Content-Type: application/json" \
-            -d '{
-              "clientId": "'"$PORT_CLIENT_ID"'",
-              "clientSecret": "'"$PORT_CLIENT_SECRET"'"
-            }')
+            -d "{\"clientId\":\"$PORT_CLIENT_ID\",\"clientSecret\":\"$PORT_CLIENT_SECRET\"}" | jq -r '.accessToken' | tr -d '[:space:]')
           
-          token=$(echo "$response" | jq -r '.accessToken')
           if [ -z "$token" ]; then
             echo "Failed to get access token"
             exit 1
           fi
-          echo "token=$token" >> $GITHUB_OUTPUT
+          echo "access_token=$token" >> "$GITHUB_OUTPUT"
 
   process_playlist:
     needs: initialize
@@ -51,12 +47,13 @@ jobs:
     env:
       YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
       PORT_RUN_ID: ${{ fromJson(inputs.port_context).runId }}
+      PORT_TOKEN: ${{ needs.initialize.outputs.access_token }}
     
     steps:
       - name: Log playlist processing start
         run: |
           curl -X POST "https://api.getport.io/v1/actions/runs/$PORT_RUN_ID/logs" \
-            -H "Authorization: Bearer ${{ needs.initialize.outputs.access_token }}" \
+            -H "Authorization: Bearer ${PORT_TOKEN}" \
             -H "Content-Type: application/json" \
             -d '{"message": "Fetching playlist details"}'
 
@@ -87,14 +84,14 @@ jobs:
             }')
 
           response=$(curl -s -X POST "https://api.getport.io/v1/blueprints/playlist/entities?upsert=true" \
-            -H "Authorization: Bearer ${{ needs.initialize.outputs.access_token }}" \
+            -H "Authorization: Bearer ${PORT_TOKEN}" \
             -H "Content-Type: application/json" \
             -d "$playlist_entity")
 
       - name: Log playlist creation
         run: |
           curl -X POST "https://api.getport.io/v1/actions/runs/$PORT_RUN_ID/logs" \
-            -H "Authorization: Bearer ${{ needs.initialize.outputs.access_token }}" \
+            -H "Authorization: Bearer ${PORT_TOKEN}" \
             -H "Content-Type: application/json" \
             -d "{\"message\": \"Created playlist entity: $PLAYLIST_TITLE\"}"
 
@@ -104,13 +101,13 @@ jobs:
     env:
       YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
       PORT_RUN_ID: ${{ fromJson(inputs.port_context).runId }}
-      ACCESS_TOKEN: ${{ needs.initialize.outputs.access_token }}
+      PORT_TOKEN: ${{ needs.initialize.outputs.access_token }}
     
     steps:
       - name: Log video processing start
         run: |
           curl -X POST "https://api.getport.io/v1/actions/runs/$PORT_RUN_ID/logs" \
-            -H "Authorization: Bearer ${{ needs.initialize.outputs.access_token }}" \
+            -H "Authorization: Bearer ${PORT_TOKEN}" \
             -H "Content-Type: application/json" \
             -d '{"message": "Starting video processing"}'
 
@@ -142,7 +139,7 @@ jobs:
           for video_id in "${video_array[@]}"; do
             # Log video processing start
             curl -X POST "https://api.getport.io/v1/actions/runs/$PORT_RUN_ID/logs" \
-              -H "Authorization: Bearer ${{ needs.initialize.outputs.access_token }}" \
+              -H "Authorization: Bearer ${PORT_TOKEN}" \
               -H "Content-Type: application/json" \
               -d "{\"message\": \"Processing video $((processed_count + 1)) of $total_videos\"}"
             
@@ -154,26 +151,26 @@ jobs:
               identifier: .id,
               title: .snippet.title,
               properties: {
-                  videoId: .id,
-                  title: .snippet.title,
-                  duration: .contentDetails.duration,
-                  viewCount: (.statistics.viewCount | tonumber),
-                  likeCount: (.statistics.likeCount | tonumber)
-                },
-                relations: {
-                  belongs_to_playlist: $playlist_id
-                }
+                videoId: .id,
+                title: .snippet.title,
+                duration: .contentDetails.duration,
+                viewCount: (.statistics.viewCount | tonumber),
+                likeCount: (.statistics.likeCount | tonumber)
+              },
+              relations: {
+                belongs_to_playlist: $playlist_id
+              }
             }')
 
             # Create video in Port
             response=$(curl -s -X POST "https://api.getport.io/v1/blueprints/video/entities?upsert=true" \
-              -H "Authorization: Bearer ${{ needs.initialize.outputs.access_token }}" \
+              -H "Authorization: Bearer ${PORT_TOKEN}" \
               -H "Content-Type: application/json" \
               -d "$video_entity")
             
             # Log video creation
             curl -X POST "https://api.getport.io/v1/actions/runs/$PORT_RUN_ID/logs" \
-              -H "Authorization: Bearer ${{ needs.initialize.outputs.access_token }}" \
+              -H "Authorization: Bearer ${PORT_TOKEN}" \
               -H "Content-Type: application/json" \
               -d "{\"message\": \"Created video entity: $(echo "$video_response" | jq -r '.items[0].snippet.title')\"}"
             
@@ -182,7 +179,7 @@ jobs:
           
           # Final progress report
           curl -X POST "https://api.getport.io/v1/actions/runs/$PORT_RUN_ID/logs" \
-            -H "Authorization: Bearer ${{ needs.initialize.outputs.access_token }}" \
+            -H "Authorization: Bearer ${PORT_TOKEN}" \
             -H "Content-Type: application/json" \
             -d "{\"message\": \"Completed processing $processed_count videos\"}"
 
@@ -190,6 +187,8 @@ jobs:
     needs: [process_playlist, process_videos]
     runs-on: ubuntu-latest
     if: always()
+    env:
+      PORT_TOKEN: ${{ needs.initialize.outputs.access_token }}
     
     steps:
       - name: Report final status
