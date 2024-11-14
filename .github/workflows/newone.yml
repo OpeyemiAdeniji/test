@@ -46,7 +46,6 @@ jobs:
 
           # Function to get Port access token with proper JSON escaping and trimming
           get_port_access_token() {
-            echo "Requesting Port access token..."
             client_id=$(echo -n "$PORT_CLIENT_ID")
             client_secret=$(echo -n "$PORT_CLIENT_SECRET")
 
@@ -67,7 +66,7 @@ jobs:
               return 1
             fi
 
-            # Extract and trim access token, ensuring only the token is output
+            # Extract and print only the access token
             echo "$response" | jq -r '.accessToken // empty' | xargs
           }
 
@@ -159,4 +158,28 @@ jobs:
               echo "Sending video entity to Port..."
               response=$(curl --http1.1 -s -w "\n%{http_code}" -X POST "https://api.getport.io/v1/blueprints/video/entities?upsert=true" \
                 -H "Authorization: Bearer $ACCESS_TOKEN" \
-                -H "
+                -H "Content-Type: application/json" \
+                -d "$video_entity")
+
+              http_code=$(echo "$response" | tail -n1)
+              body=$(echo "$response" | sed '$d')
+
+              echo "HTTP Response Code: $http_code"
+              echo "Response Body: $body"
+
+              if [[ ! "$http_code" =~ ^2[0-9][0-9]$ ]]; then
+                echo "Failed to push video to Port. HTTP code: $http_code"
+                echo "Response Body: $body"
+                continue
+              fi
+
+              echo "Successfully processed video: $video_id"
+            done
+
+            if [ -z "$next_page_token" ]; then
+              echo "No more pages to process"
+              break
+            fi
+          done
+
+          echo "Finished processing all videos"
