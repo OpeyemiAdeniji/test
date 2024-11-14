@@ -64,7 +64,6 @@ jobs:
     env:
       YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
       PLAYLIST_ID: ${{ inputs.playlistid }}
-      ACCESS_TOKEN: ${{ needs.fetch_port_token.outputs.ACCESS_TOKEN }}
     steps:
       - name: Fetch YouTube Playlist Metadata
         id: fetch_metadata
@@ -76,6 +75,11 @@ jobs:
           playlist_thumbnail=$(echo $playlist_response | jq -r '.items[0].snippet.thumbnails.default.url')
           playlist_video_count=$(echo $playlist_response | jq -r '.items[0].contentDetails.itemCount')
           playlist_published_at=$(echo $playlist_response | jq -r '.items[0].snippet.publishedAt')
+
+          if [ -z "$playlist_id" ]; then
+            echo "Failed to fetch playlist details. Exiting."
+            exit 1
+          fi
 
           playlist_entity=$(jq -n --arg id "$playlist_id" --arg title "$playlist_title" \
             --arg description "$playlist_description" --arg thumbnailUrl "$playlist_thumbnail" \
@@ -94,7 +98,7 @@ jobs:
             }')
 
           echo "::set-output name=PLAYLIST_ENTITY::$playlist_entity"
-          echo "Playlist metadata fetched successfully."
+          echo "Playlist entity created: $playlist_entity"
 
   push_playlist_to_port:
     runs-on: ubuntu-latest
@@ -104,7 +108,13 @@ jobs:
     steps:
       - name: Push Playlist Data to Port
         run: |
-          playlist_entity="${{ needs.fetch_playlist_metadata.outputs.PLAYLIST_ENTITY }}"
+          playlist_entity='${{ needs.fetch_playlist_metadata.outputs.PLAYLIST_ENTITY }}'
+
+          if [ -z "$playlist_entity" ] || [ "$playlist_entity" == "null" ]; then
+            echo "Error: playlist_entity is empty. Exiting."
+            exit 1
+          fi
+
           response=$(curl --http1.1 -s -w "%{http_code}\n" -o /tmp/playlist_response.json -X POST "https://api.getport.io/v1/blueprints/playlist/entities?upsert=true" \
             -H "Authorization: Bearer $ACCESS_TOKEN" \
             -H "Content-Type: application/json" \
@@ -186,7 +196,13 @@ jobs:
     steps:
       - name: Push Videos to Port
         run: |
-          video_entity="${{ needs.fetch_videos.outputs.VIDEO_ENTITY }}"
+          video_entity='${{ needs.fetch_videos.outputs.VIDEO_ENTITY }}'
+
+          if [ -z "$video_entity" ] || [ "$video_entity" == "null" ]; then
+            echo "Error: video_entity is empty. Exiting."
+            exit 1
+          fi
+
           response=$(curl --http1.1 -s -w "%{http_code}\n" -o /tmp/video_response.json -X POST "https://api.getport.io/v1/blueprints/video/entities?upsert=true" \
             -H "Authorization: Bearer $ACCESS_TOKEN" \
             -H "Content-Type: application/json" \
