@@ -330,8 +330,7 @@ jobs:
           set -e
           PORT_CLIENT_ID=$(echo "$PORT_CLIENT_ID" | xargs)
           PORT_CLIENT_SECRET=$(echo "$PORT_CLIENT_SECRET" | xargs)
-
-          # Function to get Port access token
+          
           get_port_access_token() {
             response=$(curl -s -X POST "https://api.getport.io/v1/auth/access_token" \
               -H "Content-Type: application/json" \
@@ -369,7 +368,16 @@ jobs:
 
       - name: Push Videos to Port
         run: |
-          videos_array=$(echo '${{ needs.fetch_videos.outputs.VIDEOS_DATA }}' | jq -r .)
+          # Create a temporary file to store the JSON array
+          echo '${{ needs.fetch_videos.outputs.VIDEOS_DATA }}' > videos_data.json
           
-          echo "$videos_array" | jq -c '.[]' | while read -r video_entity; do
-            response=$(curl -s -X POST "https://api.getport.io/v1/bluep
+          # Process each video entry safely using jq
+          jq -c '.[]' videos_data.json | while read -r video_entity; do
+            if [ -z "$video_entity" ]; then
+              echo "Warning: Empty video entity found, skipping"
+              continue
+            fi
+            
+            echo "Processing video entity: $(echo "$video_entity" | jq -r '.identifier')"
+            
+            response=$(curl -s -X POST "https://api
