@@ -47,11 +47,9 @@ jobs:
           # Function to get Port access token with proper JSON escaping and trimming
           get_port_access_token() {
             echo "Requesting Port access token..."
-            # Trim any potential newline characters from the environment variables
             client_id=$(echo -n "$PORT_CLIENT_ID")
             client_secret=$(echo -n "$PORT_CLIENT_SECRET")
 
-            # Create JSON payload using jq to ensure proper escaping
             payload=$(jq -n \
               --arg client_id "$client_id" \
               --arg client_secret "$client_secret" \
@@ -64,7 +62,6 @@ jobs:
               -H "Content-Type: application/json" \
               -d "$payload")
 
-            # Check if the response contains an error
             if echo "$response" | jq -e '.ok == false' > /dev/null; then
               echo "Error obtaining access token: $(echo "$response" | jq -r '.error // .message // "Unknown error"')"
               return 1
