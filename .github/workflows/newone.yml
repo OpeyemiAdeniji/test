@@ -54,15 +54,21 @@ jobs:
                 "clientId": "'"$PORT_CLIENT_ID"'",
                 "clientSecret": "'"$PORT_CLIENT_SECRET"'"
               }')
+            
+            # Print the raw response for debugging
+            echo "DEBUG: Raw response from API: $response"
+
             if echo "$response" | grep -q '"ok":false'; then
               echo "Error obtaining access token: $(echo "$response" | jq -r '.error' )"
               return 1
             fi
+
             access_token=$(echo "$response" | jq -r '.accessToken // empty')
             if [ -z "$access_token" ]; then
               echo "Failed to retrieve access token. Response: $response"
               return 1
             fi
+
             echo "::set-output name=access_token::$access_token"
             echo "DEBUG: Full access token: $access_token"  # Debug line, ensure to remove later
             echo "$access_token"
@@ -113,7 +119,7 @@ jobs:
           echo "$playlist_entity" | jq .
 
           # Use HTTP/1.1 to avoid HTTP/2 protocol issues and capture response
-          response=$(curl --http1.1 -s -w "%{http_code}\n" -o /tmp/playlist_response.json -X POST "https://api.getport.io/v1/blueprints/playlist/entities?upsert=true" \
+          response=$(curl --http1.1 -s -w "%{http_code}" -o /tmp/playlist_response.json -X POST "https://api.getport.io/v1/blueprints/playlist/entities?upsert=true" \
             -H "Authorization: Bearer $ACCESS_TOKEN" \
             -H "Content-Type: application/json" \
             -d "$playlist_entity")
@@ -191,7 +197,7 @@ jobs:
               echo "$video_entity" | jq .
 
               # Use HTTP/1.1 to avoid HTTP/2 protocol issues and capture response
-              response=$(curl --http1.1 -s -w "%{http_code}\n" -o /tmp/video_response.json -X POST "https://api.getport.io/v1/blueprints/video/entities?upsert=true" \
+              response=$(curl --http1.1 -s -w "%{http_code}" -o /tmp/video_response.json -X POST "https://api.getport.io/v1/blueprints/video/entities?upsert=true" \
                 -H "Authorization: Bearer $ACCESS_TOKEN" \
                 -H "Content-Type: application/json" \
                 -d "$video_entity")
