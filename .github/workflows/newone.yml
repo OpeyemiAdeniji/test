@@ -60,34 +60,27 @@ jobs:
           fi
 
 
-      - name: Extract Port Run ID
+      - name: Send Logs to Port
+        env:
+          PORT_CLIENT_ID: ${{ secrets.PORT_CLIENT_ID }}
+          PORT_CLIENT_SECRET: ${{ secrets.PORT_CLIENT_SECRET }}
         run: |
-          # Parse the port_context input and extract run ID
-          PORT_RUN_ID=$(echo '${{ inputs.port_context }}' | jq -r '.runId')
-          echo "Port Run ID: $PORT_RUN_ID"
-
           ACCESS_TOKEN=$(curl -s -X POST "https://api.getport.io/v1/auth/access_token" \
             -H "Content-Type: application/json" \
             -d '{
-              "clientId": "'"$PORT_CLIENT_ID"'",
-              "clientSecret": "'"$PORT_CLIENT_SECRET"'"
+              "clientId": "$PORT_CLIENT_ID",
+              "clientSecret": "$PORT_CLIENT_SECRET"
             }' | jq -r '.accessToken')
       
-          # Use the ACCESS_TOKEN we generated in the previous step
           curl -L "https://api.getport.io/v1/actions/runs/$PORT_RUN_ID/logs" \
             -H "Content-Type: application/json" \
             -H "Authorization: Bearer $ACCESS_TOKEN" \
             -d '{
-              "message": "Hello from the other side!!!",
-              "terminationStatus": "",
-              "statusLabel": ""
+              "message": "Setting up environment",
+              "terminationStatus": "SUCCESS",
+              "statusLabel": "Setup Complete"
             }'
-         
-
-          if ! [[ "$ACCESS_TOKEN" =~ ^[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]+$ ]]; then
-            echo "Invalid JWT format detected. Please check the token generation."
-            exit 1
-          fi
+            
 
   fetch_playlist_metadata:
     runs-on: ubuntu-latest
