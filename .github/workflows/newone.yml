@@ -62,17 +62,18 @@ jobs:
 
       - name: Extract Port Run ID
         run: |
-          # Parse the port_context input
+          # Parse the port_context input and extract run ID
           PORT_RUN_ID=$(echo '${{ inputs.port_context }}' | jq -r '.runId')
           echo "Port Run ID: $PORT_RUN_ID"
-
+      
+          # Use the ACCESS_TOKEN we generated in the previous step
           curl -L "https://api.getport.io/v1/actions/runs/$PORT_RUN_ID/logs" \
             -H "Content-Type: application/json" \
             -H "Authorization: Bearer $ACCESS_TOKEN" \
             -d '{
               "message": "Hello from the other side!!!",
-              "terminationStatus": "",
-              "statusLabel": ""
+              "terminationStatus": "SUCCESS",
+              "statusLabel": "Running"
             }'
           
 
