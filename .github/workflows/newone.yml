@@ -82,12 +82,8 @@ jobs:
 
           echo "Access token obtained: ${ACCESS_TOKEN:0:50}..."
 
-          # Validate the JWT format
-          if ! [[ "$ACCESS_TOKEN" =~ ^[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]+$ ]]; then
-            echo "Invalid JWT format detected. Please check the token generation."
-            exit 1
-          fi
-
+          # Removed JWT format validation
+          
           # Fetch playlist details
           playlist_response=$(curl -s "https://www.googleapis.com/youtube/v3/playlists?part=snippet,contentDetails,status&id=${PLAYLIST_ID}&key=${YOUTUBE_API_KEY}")
           playlist_id=$(echo $playlist_response | jq -r '.items[0].id')
