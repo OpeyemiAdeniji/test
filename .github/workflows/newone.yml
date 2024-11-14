@@ -1,4 +1,5 @@
 name: Update Port with YouTube Playlist Data
+
 on:
   workflow_dispatch:
     inputs:
@@ -270,6 +271,7 @@ jobs:
             exit 1
           fi
           echo "ACCESS_TOKEN=$ACCESS_TOKEN" >> $GITHUB_ENV
+
           # Parse the videos array
           videos_data=$(echo '${{ needs.fetch_videos.outputs.videos_array }}' | jq -r .)
           
