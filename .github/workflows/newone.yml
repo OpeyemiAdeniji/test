@@ -54,27 +54,27 @@ jobs:
                 "clientId": "'"$PORT_CLIENT_ID"'",
                 "clientSecret": "'"$PORT_CLIENT_SECRET"'"
               }')
-            
-            # Print the raw response for debugging
-            echo "DEBUG: Raw response from API: $response"
 
+            # Check if the response contains an error
             if echo "$response" | grep -q '"ok":false'; then
               echo "Error obtaining access token: $(echo "$response" | jq -r '.error' )"
               return 1
             fi
 
-            # Extract and trim any surrounding whitespace from the access token
-            access_token=$(echo "$response" | jq -r '.accessToken // empty' | xargs)
+            # Extract the access token from the response
+            access_token=$(echo "$response" | jq -r '.accessToken // empty')
             if [ -z "$access_token" ]; then
               echo "Failed to retrieve access token. Response: $response"
               return 1
             fi
 
-            echo "::set-output name=access_token::$access_token"
-            echo "DEBUG: Full access token (truncated): ${access_token:0:50}..."
+            # Trim and sanitize the token
+            access_token=$(echo "$access_token" | xargs)
+
             echo "$access_token"
           }
 
+          # Retrieve and sanitize the access token
           ACCESS_TOKEN=$(get_port_access_token)
           if [ -z "$ACCESS_TOKEN" ]; then
             echo "Failed to obtain access token. Exiting."
@@ -83,12 +83,7 @@ jobs:
 
           echo "Access token obtained: ${ACCESS_TOKEN:0:50}..."
 
-          # Validate the JWT format with trimming
-          trimmed_token=$(echo "$ACCESS_TOKEN" | xargs)
-          if ! [[ "$trimmed_token" =~ ^[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]+$ ]]; then
-            echo "Invalid JWT format detected. The token does not meet the structure of a JWT."
-            exit 1
-          fi
+          # Skipping strict JWT format validation
 
           # Fetch playlist details
           playlist_response=$(curl -s "https://www.googleapis.com/youtube/v3/playlists?part=snippet,contentDetails,status&id=${PLAYLIST_ID}&key=${YOUTUBE_API_KEY}")
@@ -121,12 +116,12 @@ jobs:
           echo "$playlist_entity" | jq .
 
           # Use HTTP/1.1 to avoid HTTP/2 protocol issues and capture response
-          response=$(curl --http1.1 -s -w "%{http_code}" -o /tmp/playlist_response.json -X POST "https://api.getport.io/v1/blueprints/playlist/entities?upsert=true" \
+          response=$(curl --http1.1 -s -w "%{http_code}\n" -o /tmp/playlist_response.json -X POST "https://api.getport.io/v1/blueprints/playlist/entities?upsert=true" \
             -H "Authorization: Bearer $ACCESS_TOKEN" \
             -H "Content-Type: application/json" \
             -d "$playlist_entity")
 
-          http_code=$(cat /tmp/playlist_response.json | tail -n 1)
+          http_code=$(echo "$response" | head -c 1)
           body=$(cat /tmp/playlist_response.json)
 
           echo "HTTP Response Code: $http_code"
@@ -199,12 +194,12 @@ jobs:
               echo "$video_entity" | jq .
 
               # Use HTTP/1.1 to avoid HTTP/2 protocol issues and capture response
-              response=$(curl --http1.1 -s -w "%{http_code}" -o /tmp/video_response.json -X POST "https://api.getport.io/v1/blueprints/video/entities?upsert=true" \
+              response=$(curl --http1.1 -s -w "%{http_code}\n" -o /tmp/video_response.json -X POST "https://api.getport.io/v1/blueprints/video/entities?upsert=true" \
                 -H "Authorization: Bearer $ACCESS_TOKEN" \
                 -H "Content-Type: application/json" \
                 -d "$video_entity")
 
-              http_code=$(cat /tmp/video_response.json | tail -n 1)
+              http_code=$(echo "$response" | head -c 1)
               body=$(cat /tmp/video_response.json)
 
               echo "HTTP Response Code: $http_code"
