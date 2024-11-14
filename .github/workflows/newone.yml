@@ -17,10 +17,6 @@ jobs:
       PORT_CLIENT_ID: ${{ secrets.PORT_CLIENT_ID }}
       PORT_CLIENT_SECRET: ${{ secrets.PORT_CLIENT_SECRET }}
     steps:
-      - name: Clear cache
-        run: |
-          rm -rf ~/.cache
-          git clean -xdf
       - name: Checkout code
         uses: actions/checkout@v4
 
