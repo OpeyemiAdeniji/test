@@ -63,6 +63,8 @@ jobs:
               echo "Failed to retrieve access token. Response: $response"
               return 1
             fi
+            echo "::set-output name=access_token::$access_token"
+            echo "DEBUG: Full access token: $access_token"  # Debug line, ensure to remove later
             echo "$access_token"
           }
 
@@ -116,7 +118,7 @@ jobs:
             -H "Content-Type: application/json" \
             -d "$playlist_entity")
 
-          http_code=$(echo "$response" | head -c 1)
+          http_code=$(cat /tmp/playlist_response.json | tail -n 1)
           body=$(cat /tmp/playlist_response.json)
 
           echo "HTTP Response Code: $http_code"
@@ -194,7 +196,7 @@ jobs:
                 -H "Content-Type: application/json" \
                 -d "$video_entity")
 
-              http_code=$(echo "$response" | head -c 1)
+              http_code=$(cat /tmp/video_response.json | tail -n 1)
               body=$(cat /tmp/video_response.json)
 
               echo "HTTP Response Code: $http_code"
