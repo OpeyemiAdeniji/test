@@ -44,7 +44,7 @@ jobs:
             -H "Content-Type: application/json" \
             -H "Authorization: Bearer $ACCESS_TOKEN" \
             -d '{
-              "message": "Metadata fetch of playlist has commenced PLAYLIST_ID -$PLAYLIST_ID",
+              "message": "Metadata fetch of playlist has commenced",
               "statusLabel": "Fetching Playlist"
             }'
 
@@ -81,7 +81,7 @@ jobs:
             -H "Content-Type: application/json" \
             -H "Authorization: Bearer $ACCESS_TOKEN" \
             -d '{
-              "message": "Successfully fetched playlist metadata PLAYLIST_ID - $PLAYLIST_ID",
+              "message": "Successfully fetched playlist metadata",
               "statusLabel": "Playlist Fetched"
             }'
 
@@ -138,7 +138,7 @@ jobs:
             -H "Content-Type: application/json" \
             -H "Authorization: Bearer $ACCESS_TOKEN" \
             -d '{
-              "message": "Successfully migrated playlist data to Port PLAYLIST_ID - $PLAYLIST_ID",
+              "message": "Successfully migrated playlist data to Port",
               "statusLabel": "Playlist Pushed"
             }'
 
