@@ -22,26 +22,42 @@ jobs:
       playlist_id: ${{ steps.fetch_metadata.outputs.PLAYLIST_ID }}
       playlist_data: ${{ steps.fetch_metadata.outputs.PLAYLIST_DATA }}
     steps:
-      - name: Generate Access Token
+      - name: Generate and Validate Access Token
         id: token
         run: |
-          ACCESS_TOKEN=$(curl -s -X POST "https://api.getport.io/v1/auth/access_token" \
-            -H "Content-Type: application/json" \
-            -d '{
-              "clientId": "'"$PORT_CLIENT_ID"'",
-              "clientSecret": "'"$PORT_CLIENT_SECRET"'"
-            }' | jq -r '.accessToken')
+          set -e
+          PORT_CLIENT_ID=$(echo "$PORT_CLIENT_ID" | xargs)
+          PORT_CLIENT_SECRET=$(echo "$PORT_CLIENT_SECRET" | xargs)
           
-          echo "ACCESS_TOKEN=$ACCESS_TOKEN" >> $GITHUB_ENV
+          # Function to get Port access token
+          get_port_access_token() {
+            response=$(curl -s -X POST "https://api.getport.io/v1/auth/access_token" \
+              -H "Content-Type: application/json" \
+              -d '{
+                "clientId": "'"$PORT_CLIENT_ID"'",
+                "clientSecret": "'"$PORT_CLIENT_SECRET"'"
+              }')
+            echo "$access_token"
+          }
+          
+          ACCESS_TOKEN=$(get_port_access_token)
 
       - name: Send Start Logs to Port
+        id: start_log
         run: |
+          set -e
+          
+          # Extract Port Run ID
+          
           PORT_RUN_ID=$(echo '${{ inputs.port_context }}' | jq -r '.runId')
+          
+          echo "Port Run ID: $PORT_RUN_ID"
+          
           curl -L "https://api.getport.io/v1/actions/runs/$PORT_RUN_ID/logs" \
             -H "Content-Type: application/json" \
             -H "Authorization: Bearer $ACCESS_TOKEN" \
             -d '{
-              "message": "Starting playlist metadata fetch",
+             "message": "Starting playlist metadata fetch",
               "status": "IN_PROGRESS",
               "statusLabel": "Fetching Metadata"
             }'
@@ -144,7 +160,7 @@ jobs:
               "statusLabel": "Playlist Pushed"
             }'
 
-  fetch_and_push_videos:
+  fetch_videos:
     needs: push_playlist_to_port
     runs-on: ubuntu-latest
     env:
@@ -152,6 +168,8 @@ jobs:
       PORT_CLIENT_SECRET: ${{ secrets.PORT_CLIENT_SECRET }}
       YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
       PLAYLIST_ID: ${{ inputs.playlistid }}
+    outputs:
+      videos_data: ${{ steps.collect_videos.outputs.videos_json }}
     steps:
       - name: Generate Access Token
         id: token
@@ -172,13 +190,16 @@ jobs:
             -H "Content-Type: application/json" \
             -H "Authorization: Bearer $ACCESS_TOKEN" \
             -d '{
-              "message": "Starting video fetch and push",
+              "message": "Starting video fetch from YouTube",
               "status": "IN_PROGRESS",
-              "statusLabel": "Processing Videos"
+              "statusLabel": "Fetching Videos"
             }'
 
-      - name: Fetch and Push Videos
+      - name: Collect Video Data
+        id: collect_videos
         run: |
+          # Initialize videos array
+          videos_array="[]"
           next_page_token=""
           
           while true; do
@@ -214,24 +235,86 @@ jobs:
                 }
               }')
               
-              # Push video to Port
-              response=$(curl -s -w "%{http_code}" -X POST "https://api.getport.io/v1/blueprints/video/entities?upsert=true" \
-                -H "Authorization: Bearer $ACCESS_TOKEN" \
-                -H "Content-Type: application/json" \
-                -d "$video_json")
-              
-              if [[ "${response: -3}" != "200" && "${response: -3}" != "201" ]]; then
-                echo "Failed to push video to Port. Response: $response"
-                exit 1
-              fi
-              
-              # Add small delay to prevent rate limiting
-              sleep 1
+              # Append to videos array
+              videos_array=$(echo $videos_array | jq --argjson video "$video_json" '. + [$video]')
             done
             
             # Check for next page
             next_page_token=$(echo $playlist_response | jq -r '.nextPageToken // empty')
             [ -z "$next_page_token" ] && break
+          done
+          
+          # Escape the JSON array for GitHub Actions output
+          escaped_array=$(echo "$videos_array" | jq -r '@json')
+          echo "videos_json=$escaped_array" >> $GITHUB_OUTPUT
+
+      - name: Send Completion Logs to Port
+        if: success()
+        run: |
+          PORT_RUN_ID=$(echo '${{ inputs.port_context }}' | jq -r '.runId')
+          curl -L "https://api.getport.io/v1/actions/runs/$PORT_RUN_ID/logs" \
+            -H "Content-Type: application/json" \
+            -H "Authorization: Bearer $ACCESS_TOKEN" \
+            -d '{
+              "message": "Successfully fetched all videos",
+              "terminationStatus": "SUCCESS",
+              "statusLabel": "Videos Fetched"
+            }'
+
+  push_videos_to_port:
+    needs: [fetch_videos, fetch_playlist_metadata]
+    runs-on: ubuntu-latest
+    env:
+      PORT_CLIENT_ID: ${{ secrets.PORT_CLIENT_ID }}
+      PORT_CLIENT_SECRET: ${{ secrets.PORT_CLIENT_SECRET }}
+    steps:
+      - name: Generate Access Token
+        id: token
+        run: |
+          ACCESS_TOKEN=$(curl -s -X POST "https://api.getport.io/v1/auth/access_token" \
+            -H "Content-Type: application/json" \
+            -d '{
+              "clientId": "'"$PORT_CLIENT_ID"'",
+              "clientSecret": "'"$PORT_CLIENT_SECRET"'"
+            }' | jq -r '.accessToken')
+          
+          echo "ACCESS_TOKEN=$ACCESS_TOKEN" >> $GITHUB_ENV
+
+      - name: Send Start Logs to Port
+        run: |
+          PORT_RUN_ID=$(echo '${{ inputs.port_context }}' | jq -r '.runId')
+          curl -L "https://api.getport.io/v1/actions/runs/$PORT_RUN_ID/logs" \
+            -H "Content-Type: application/json" \
+            -H "Authorization: Bearer $ACCESS_TOKEN" \
+            -d '{
+              "message": "Starting video push to Port",
+              "status": "IN_PROGRESS",
+              "statusLabel": "Pushing Videos"
+            }'
+
+      - name: Push Videos to Port
+        run: |
+          # Parse the videos array
+          videos_data='${{ needs.fetch_videos.outputs.videos_data }}'
+          
+          echo "$videos_data" | jq -c '.[]' | while read -r video; do
+            # Push to Port
+            response=$(curl -s -w "%{http_code}" -X POST "https://api.getport.io/v1/blueprints/video/entities?upsert=true" \
+              -H "Authorization: Bearer $ACCESS_TOKEN" \
+              -H "Content-Type: application/json" \
+              -d "$video")
+            
+            status_code=${response: -3}
+            response_body=${response%???}
+            
+            if [[ "$status_code" != "200" && "$status_code" != "201" ]]; then
+              echo "Failed to push video to Port. Status code: $status_code"
+              echo "Response body: $response_body"
+              exit 1
+            fi
+            
+            # Add small delay to prevent rate limiting
+            sleep 1
           done
 
       - name: Send Completion Logs to Port
@@ -242,7 +325,7 @@ jobs:
             -H "Content-Type: application/json" \
             -H "Authorization: Bearer $ACCESS_TOKEN" \
             -d '{
-              "message": "Successfully processed all videos",
+              "message": "Successfully pushed all videos to Port",
               "terminationStatus": "SUCCESS",
-              "statusLabel": "Videos Processed"
+              "statusLabel": "Videos Pushed"
             }'
