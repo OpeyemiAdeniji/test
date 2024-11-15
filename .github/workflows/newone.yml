@@ -11,6 +11,76 @@ on:
         required: true
 
 jobs:
+  setup_environment:
+    runs-on: ubuntu-latest
+    env:
+      PORT_CLIENT_ID: ${{ secrets.PORT_CLIENT_ID }}
+      PORT_CLIENT_SECRET: ${{ secrets.PORT_CLIENT_SECRET }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+  
+      - name: Install jq for JSON processing
+        run: sudo apt-get install jq
+  
+      - name: Generate and Validate Access Token
+        id: token
+        run: |
+          set -e
+          PORT_CLIENT_ID=$(echo "$PORT_CLIENT_ID" | xargs)
+          PORT_CLIENT_SECRET=$(echo "$PORT_CLIENT_SECRET" | xargs)
+  
+          # Function to get Port access token
+          get_port_access_token() {
+            response=$(curl -s -X POST "https://api.getport.io/v1/auth/access_token" \
+              -H "Content-Type: application/json" \
+              -d '{
+                "clientId": "'"$PORT_CLIENT_ID"'",
+                "clientSecret": "'"$PORT_CLIENT_SECRET"'"
+              }')
+  
+            if echo "$response" | grep -q '"ok":false'; then
+              echo "Error obtaining access token: $(echo "$response" | jq -r '.error')"
+              return 1
+            fi
+  
+            access_token=$(echo "$response" | jq -r '.accessToken // empty')
+            if [ -z "$access_token" ]; then
+              echo "Failed to retrieve access token. Response: $response"
+              return 1
+            fi
+  
+            echo "$access_token"
+          }
+  
+          ACCESS_TOKEN=$(get_port_access_token)
+          if [ -z "$ACCESS_TOKEN" ]; then
+            echo "Failed to obtain access token. Exiting."
+            exit 1
+          fi
+  
+  
+      - name: Send Logs to Port
+        env:
+          PORT_CLIENT_ID: ${{ secrets.PORT_CLIENT_ID }}
+          PORT_CLIENT_SECRET: ${{ secrets.PORT_CLIENT_SECRET }}
+        run: |
+          ACCESS_TOKEN=$(curl -s -X POST "https://api.getport.io/v1/auth/access_token" \
+            -H "Content-Type: application/json" \
+            -d '{
+              "clientId": "$PORT_CLIENT_ID",
+              "clientSecret": "$PORT_CLIENT_SECRET"
+            }' | jq -r '.accessToken')
+      
+          curl -L "https://api.getport.io/v1/actions/runs/$PORT_RUN_ID/logs" \
+            -H "Content-Type: application/json" \
+            -H "Authorization: Bearer $ACCESS_TOKEN" \
+            -d '{
+              "message": "Setting up environment",
+              "terminationStatus": "SUCCESS",
+              "statusLabel": "Setup Complete"
+            }'
+
   fetch_playlist_metadata:
     runs-on: ubuntu-latest
     env:
