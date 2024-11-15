@@ -44,7 +44,7 @@ jobs:
             -H "Content-Type: application/json" \
             -H "Authorization: Bearer $ACCESS_TOKEN" \
             -d '{
-              "message": "Starting playlist metadata fetch",
+              "message": "Starting playlist - 'PLAYLIST_ID' metadata fetch",
               "statusLabel": "Fetching Playlist"
             }'
 
