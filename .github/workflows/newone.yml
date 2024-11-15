@@ -52,7 +52,7 @@ jobs:
             -H "Authorization: Bearer $ACCESS_TOKEN" \
             -d '{
              "message": "Starting playlist metadata fetch",
-              "statusLabel": "Fetching Metadata"
+              "statusLabel": "Fetching Playlist"
             }'
 
       - name: Fetch YouTube Playlist Metadata
@@ -91,8 +91,7 @@ jobs:
             -H "Authorization: Bearer $ACCESS_TOKEN" \
             -d '{
               "message": "Successfully fetched playlist metadata",
-              "terminationStatus": "SUCCESS",
-              "statusLabel": "Metadata Fetched"
+              "statusLabel": "Playlist Fetched"
             }'
 
   push_playlist_to_port:
@@ -102,18 +101,20 @@ jobs:
       PORT_CLIENT_ID: ${{ secrets.PORT_CLIENT_ID }}
       PORT_CLIENT_SECRET: ${{ secrets.PORT_CLIENT_SECRET }}
     steps:
-      - name: Generate Access Token
+      - name: Generate and Validate Access Token
         id: token
         run: |
-          ACCESS_TOKEN=$(curl -s -X POST "https://api.getport.io/v1/auth/access_token" \
-            -H "Content-Type: application/json" \
-            -d '{
-              "clientId": "'"$PORT_CLIENT_ID"'",
-              "clientSecret": "'"$PORT_CLIENT_SECRET"'"
-            }' | jq -r '.accessToken')
+          set -e
+          PORT_CLIENT_ID=$(echo "$PORT_CLIENT_ID" | xargs)
+          PORT_CLIENT_SECRET=$(echo "$PORT_CLIENT_SECRET" | xargs)
           
-          echo "ACCESS_TOKEN=$ACCESS_TOKEN" >> $GITHUB_ENV
-
+          # Function to get Port access token
+            response=$(curl -s -X POST "https://api.getport.io/v1/auth/access_token" \
+              -H "Content-Type: application/json" \
+              -d "{\"clientId\": \"$PORT_CLIENT_ID\", \"clientSecret\": \"$PORT_CLIENT_SECRET\"}")
+            ACCESS_TOKEN=$(echo "$response" | jq -r '.accessToken')
+            echo "ACCESS_TOKEN=$ACCESS_TOKEN" >> $GITHUB_ENV
+            
       - name: Send Start Logs to Port
         run: |
           PORT_RUN_ID=$(echo '${{ inputs.port_context }}' | jq -r '.runId')
@@ -122,8 +123,7 @@ jobs:
             -H "Authorization: Bearer $ACCESS_TOKEN" \
             -d '{
               "message": "Starting playlist push to Port",
-              "status": "IN_PROGRESS",
-              "statusLabel": "Pushing Playlist"
+              "statusLabel": " Sending Playlist to Port"
             }'
 
       - name: Push Playlist Data to Port
@@ -149,7 +149,6 @@ jobs:
             -H "Authorization: Bearer $ACCESS_TOKEN" \
             -d '{
               "message": "Successfully pushed playlist to Port",
-              "terminationStatus": "SUCCESS",
               "statusLabel": "Playlist Pushed"
             }'
 
