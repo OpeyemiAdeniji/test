@@ -39,11 +39,7 @@ jobs:
         id: start_log
         run: |
           set -e
-          
           PORT_RUN_ID=$(echo '${{ inputs.port_context }}' | jq -r '.runId')
-          
-          echo "Port Run ID: $PORT_RUN_ID"
-          
           curl -L "https://api.getport.io/v1/actions/runs/$PORT_RUN_ID/logs" \
             -H "Content-Type: application/json" \
             -H "Authorization: Bearer $ACCESS_TOKEN" \
@@ -228,9 +224,14 @@ jobs:
                   belongs_to_playlist: "'"$PLAYLIST_ID"'"
                 }
               }' | while read -r video; do
-                # Append each video to the array in videos.json
-                tmp=$(mktemp)
-                jq --argjson video "$video" '. + [$video]' videos.json > "$tmp" && mv "$tmp" videos.json
+                # Validate JSON before appending
+                if echo "$video" | jq -e 'has("identifier")' > /dev/null; then
+                  # Append each video to the array in videos.json
+                  tmp=$(mktemp)
+                  jq --argjson video "$video" '. + [$video]' videos.json > "$tmp" && mv "$tmp" videos.json
+                else
+                  echo "Warning: Invalid video data structure, skipping"
+                fi
               done
             fi
             
@@ -241,9 +242,15 @@ jobs:
             echo "Moving to next page..."
           done
           
+          # Validate final JSON array
+          if ! jq -e 'type == "array"' videos.json > /dev/null; then
+            echo "Error: Final videos.json is not a valid JSON array"
+            exit 1
+          fi
+          
           # Set the output for GitHub Actions
           videos_json=$(jq -c '.' videos.json)
-          echo "videos_json=${videos_json}" >> $GITHUB_OUTPUT
+          echo "videos_json=$videos_json" >> $GITHUB_OUTPUT
           
           # Debug information
           echo "Total videos collected: $(jq 'length' videos.json)"
@@ -293,23 +300,35 @@ jobs:
 
       - name: Push Videos to Port
         run: |
-          # Process videos directly from the output variable
-          echo '${{ needs.fetch_videos.outputs.videos_data }}' | jq -c '.[]' | while read -r video; do
+          # Create a temporary file for the videos data
+          echo '${{ needs.fetch_videos.outputs.videos_data }}' > videos_data.json
+          
+          # Validate the input JSON
+          if ! jq -e 'type == "array"' videos_data.json > /dev/null; then
+            echo "Error: Input is not a valid JSON array"
+            exit 1
+          fi
+          
+          # Process each video with proper error handling
+          jq -c '.[]' videos_data.json | while read -r video; do
             echo "Processing video..."
             
             # Validate video JSON structure
-            if ! echo "$video" | jq -e '.identifier' > /dev/null; then
-              echo "Error: Invalid video data structure"
+            if ! echo "$video" | jq -e 'has("identifier") and has("title") and has("properties") and has("relations")' > /dev/null; then
+              echo "Warning: Invalid video data structure, skipping"
               echo "$video" | jq '.'
               continue
             fi
+            
+            # Ensure proper JSON escaping for curl
+            video_escaped=$(echo "$video" | jq -c '.')
             
             # Send to Port with proper error handling
             response=$(curl -s -w "\n%{http_code}" \
               -X POST "https://api.getport.io/v1/blueprints/video/entities?upsert=true" \
               -H "Authorization: Bearer $ACCESS_TOKEN" \
               -H "Content-Type: application/json" \
-              -d "$video")
+              -d "$video_escaped")
             
             status_code=$(echo "$response" | tail -n1)
             response_body=$(echo "$response" | head -n -1)
@@ -317,12 +336,35 @@ jobs:
             if [[ "$status_code" != "200" && "$status_code" != "201" ]]; then
               echo "Failed to push video. Status: $status_code"
               echo "Response: $response_body"
-              echo "Video data: $video"
-              exit 1
+              echo "Video data:"
+              echo "$video" | jq '.'
+              
+              # Log failure to Port
+              PORT_RUN_ID=$(echo '${{ inputs.port_context }}' | jq -r '.runId')
+              video_id=$(echo "$video" | jq -r '.identifier')
+              curl -L "https://api.getport.io/v1/actions/runs/$PORT_RUN_ID/logs" \
+                -H "Content-Type: application/json" \
+                -H "Authorization: Bearer $ACCESS_TOKEN" \
+                -d "{
+                  \"message\": \"Failed to push video ${video_id}\",
+                  \"statusLabel\": \"Error\"
+                }"
+              
+              continue  # Skip to next video instead of failing the whole job
             fi
             
             video_id=$(echo "$video" | jq -r '.identifier')
             echo "Successfully pushed video: $video_id"
+            
+            # Log success to Port
+            PORT_RUN_ID=$(echo '${{ inputs.port_context }}' | jq -r '.runId')
+            curl -L "https://api.getport.io/v1/actions/runs/$PORT_RUN_ID/logs" \
+              -H "Content-Type: application/json" \
+              -H "Authorization: Bearer $ACCESS_TOKEN" \
+              -d "{
+                \"message\": \"Successfully pushed video ${video_id}\",
+                \"statusLabel\": \"Processing\"
+              }"
             
             # Rate limiting prevention
             sleep 0.5
@@ -336,6 +378,26 @@ jobs:
             -H "Content-Type: application/json" \
             -H "Authorization: Bearer $ACCESS_TOKEN" \
             -d '{
-              "message": "Successfully pushed all videos to Port",
-              "statusLabel": "Videos Pushed"
+              "message": "Completed pushing videos to Port",
+              "statusLabel": "Complete"
             }'
+
+      - name: Handle Job Completion
+        if: always()
+        run: |
+          PORT_RUN_ID=$(echo '${{ inputs.port_context }}' | jq -r '.runId')
+          if [[ "$?" == "0" ]]; then
+            STATUS_LABEL="Success"
+            MESSAGE="Successfully completed video processing"
+          else
+            STATUS_LABEL="Failed"
+            MESSAGE="Failed to complete video processing"
+          fi
+          
+          curl -L "https://api.getport.io/v1/actions/runs/$PORT_RUN_ID/logs" \
+            -H "Content-Type: application/json" \
+            -H "Authorization: Bearer $ACCESS_TOKEN" \
+            -d "{
+              \"message\": \"$MESSAGE\",
+              \"statusLabel\": \"$STATUS_LABEL\"
+            }"
