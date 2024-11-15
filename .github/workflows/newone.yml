@@ -55,7 +55,6 @@ jobs:
             -H "Authorization: Bearer $ACCESS_TOKEN" \
             -d '{
              "message": "Starting playlist metadata fetch",
-              "status": "IN_PROGRESS",
               "statusLabel": "Fetching Metadata"
             }'
 
