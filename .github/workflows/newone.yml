@@ -44,7 +44,7 @@ jobs:
             -H "Content-Type: application/json" \
             -H "Authorization: Bearer $ACCESS_TOKEN" \
             -d '{
-              "message": "Metadata fetch of playlist has commenced",
+              "message": "Metadata fetch of playlist has commenced PLAYLIST_ID - '$PLAYLIST_ID'",
               "statusLabel": "Fetching Playlist"
             }'
 
@@ -81,7 +81,7 @@ jobs:
             -H "Content-Type: application/json" \
             -H "Authorization: Bearer $ACCESS_TOKEN" \
             -d '{
-              "message": "Successfully fetched playlist metadata",
+              "message": "Successfully fetched playlist metadata PLAYLIST_ID - '$PLAYLIST_ID'",
               "statusLabel": "Playlist Fetched"
             }'
 
@@ -91,6 +91,7 @@ jobs:
     env:
       PORT_CLIENT_ID: ${{ secrets.PORT_CLIENT_ID }}
       PORT_CLIENT_SECRET: ${{ secrets.PORT_CLIENT_SECRET }}
+      PLAYLIST_ID: ${{ inputs.playlistid }}
     steps:
       - name: Generate and Validate Access Token
         id: token
@@ -112,7 +113,7 @@ jobs:
             -H "Content-Type: application/json" \
             -H "Authorization: Bearer $ACCESS_TOKEN" \
             -d '{
-              "message": "Migrating playlist data to Port has commenced PLAYLIST_ID - $PLAYLIST_ID",
+              "message": "Migrating playlist data to Port has commenced PLAYLIST_ID - '$PLAYLIST_ID'",
               "statusLabel": "Sending Playlist to Port"
             }'
 
@@ -138,7 +139,7 @@ jobs:
             -H "Content-Type: application/json" \
             -H "Authorization: Bearer $ACCESS_TOKEN" \
             -d '{
-              "message": "Successfully migrated playlist data to Port",
+              "message": "Successfully migrated playlist data to Port PLAYLIST_ID - '$PLAYLIST_ID'",
               "statusLabel": "Playlist Pushed"
             }'
 
@@ -173,7 +174,7 @@ jobs:
             -H "Content-Type: application/json" \
             -H "Authorization: Bearer $ACCESS_TOKEN" \
             -d '{
-              "message": "Extraction of video data from YouTube has commenced",
+              "message": "Extraction of video data from YouTube has commenced PLAYLIST_ID - '$PLAYLIST_ID'",
               "statusLabel": "Fetching Videos"
             }'
 
@@ -271,7 +272,7 @@ jobs:
             -H "Content-Type: application/json" \
             -H "Authorization: Bearer $ACCESS_TOKEN" \
             -d '{
-              "message": "Successfully fetched all videos",
+              "message": "Successfully fetched all videos PLAYLIST_ID - '$PLAYLIST_ID'",
               "statusLabel": "Videos Fetched"
             }'
 
@@ -281,6 +282,7 @@ jobs:
     env:
       PORT_CLIENT_ID: ${{ secrets.PORT_CLIENT_ID }}
       PORT_CLIENT_SECRET: ${{ secrets.PORT_CLIENT_SECRET }}
+      PLAYLIST_ID: ${{ inputs.playlistid }}
     steps:
       - name: Generate and Validate Access Token
         id: token
@@ -308,7 +310,7 @@ jobs:
             -H "Content-Type: application/json" \
             -H "Authorization: Bearer $ACCESS_TOKEN" \
             -d '{
-              "message": "Video data has been migrated to Port",
+              "message": "Video data has been migrated to Port PLAYLIST_ID - '$PLAYLIST_ID'",
               "statusLabel": "Complete"
             }'
 
