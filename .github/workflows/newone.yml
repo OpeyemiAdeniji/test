@@ -287,12 +287,8 @@ jobs:
 
       - name: Push Videos to Port
         run: |
-          # Parse the videos array
-          videos_data=$(echo '${{ needs.fetch_videos.outputs.videos_array }}' | jq -r .)
-          
-          # Process each video
-          echo "$videos_data" | jq -c '.[]' | while read -r video; do
-            # Push to Port
+          # Parse the videos array - note we use videos_data not videos_array
+          echo '${{ needs.fetch_videos.outputs.videos_data }}' | jq -r . | jq -c '.[]' | while read -r video; do
             response=$(curl -s -w "%{http_code}" -X POST "https://api.getport.io/v1/blueprints/video/entities?upsert=true" \
               -H "Authorization: Bearer $ACCESS_TOKEN" \
               -H "Content-Type: application/json" \
@@ -301,9 +297,14 @@ jobs:
             status_code=${response: -3}
             response_body=${response%???}
             
+            if [[ "$status_code" != "200" && "$status_code" != "201" ]]; then
+              echo "Failed to push video to Port. Status code: $status_code"
+              echo "Response: $response_body"
+              exit 1
+            fi
             
             echo "Successfully pushed video to Port"
-     
+            
             # Add small delay to prevent rate limiting
             sleep 1
           done
