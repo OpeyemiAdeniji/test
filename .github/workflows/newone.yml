@@ -287,12 +287,15 @@ jobs:
 
       - name: Push Videos to Port
         run: |
-          # Store the JSON array
-          videos_json='${{ needs.fetch_videos.outputs.videos_data }}'
-          
-          # Process each video in the array using jq
-          echo "$videos_json" | jq -c '.[]' | while read -r video; do
-            echo "Processing video: $(echo "$video" | jq -r '.title')"
+          # Create a temporary file for the JSON
+          echo "spot 1"
+          echo '${{ needs.fetch_videos.outputs.videos_data }}' > videos.json
+
+          echo "about to enter while loop"
+          # Process each video using jq
+          cat videos.json | jq -c '.[]' | while IFS= read -r video; do
+            # Debug output
+            echo "Processing video data length: ${#video}"
             
             # Send the video data to Port
             response=$(curl -s -w "\n%{http_code}" -X POST "https://api.getport.io/v1/blueprints/video/entities?upsert=true" \
@@ -314,6 +317,10 @@ jobs:
             # Add small delay to prevent rate limiting
             sleep 1
           done
+          echo "done with while loop"
+          
+          # Clean up
+          rm videos.json
 
       - name: Send Completion Logs to Port
         if: success()
