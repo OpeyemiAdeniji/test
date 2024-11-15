@@ -30,17 +30,14 @@ jobs:
           PORT_CLIENT_SECRET=$(echo "$PORT_CLIENT_SECRET" | xargs)
           
           # Function to get Port access token
-          get_port_access_token() {
             response=$(curl -s -X POST "https://api.getport.io/v1/auth/access_token" \
               -H "Content-Type: application/json" \
               -d '{
                 "clientId": "'"$PORT_CLIENT_ID"'",
                 "clientSecret": "'"$PORT_CLIENT_SECRET"'"
               }')
-            echo "$access_token"
-          }
-          
-          ACCESS_TOKEN=$(get_port_access_token)
+            ACCESS_TOKEN=$(echo "$response" | jq -r '.accessToken')
+            echo "$ACCESS_TOKEN"
 
       - name: Send Start Logs to Port
         id: start_log
