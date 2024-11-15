@@ -287,19 +287,31 @@ jobs:
 
       - name: Push Videos to Port
         run: |
-          # Parse the videos array - note we use videos_data not videos_array
-          echo '${{ needs.fetch_videos.outputs.videos_data }}' | jq -r . | jq -c '.[]' | while read -r video; do
-            response=$(curl -s -w "%{http_code}" -X POST "https://api.getport.io/v1/blueprints/video/entities?upsert=true" \
+          # First, decode the JSON string from the output
+          videos_json='${{ needs.fetch_videos.outputs.videos_data }}'
+          
+          # Convert the escaped JSON string back to an array
+          echo "$videos_json" | jq -r . | while read -r video; do
+            # Skip empty lines
+            if [ -z "$video" ]; then
+              continue
+            fi
+            
+            echo "Processing video: $(echo "$video" | jq -r '.title')"
+            
+            # Send the video data to Port
+            response=$(curl -s -w "\n%{http_code}" -X POST "https://api.getport.io/v1/blueprints/video/entities?upsert=true" \
               -H "Authorization: Bearer $ACCESS_TOKEN" \
               -H "Content-Type: application/json" \
               -d "$video")
             
-            status_code=${response: -3}
-            response_body=${response%???}
+            status_code=$(echo "$response" | tail -n1)
+            response_body=$(echo "$response" | head -n -1)
             
             if [[ "$status_code" != "200" && "$status_code" != "201" ]]; then
               echo "Failed to push video to Port. Status code: $status_code"
               echo "Response: $response_body"
+              echo "Video data: $video"
               exit 1
             fi
             
