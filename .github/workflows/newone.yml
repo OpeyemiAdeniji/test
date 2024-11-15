@@ -201,11 +201,11 @@ jobs:
               
               echo "$video_details" | jq -c '.items[] | {
                 identifier: .id,
-                title: .snippet.title,
+                title: (.snippet.title | @json),
                 properties: {
                   videoId: .id,
-                  title: .snippet.title,
-                  description: .snippet.description,
+                  title: (.snippet.title | @json),
+                  description: (.snippet.description | @json),
                   thumbnailUrl: .snippet.thumbnails.default.url,
                   duration: .contentDetails.duration,
                   viewCount: (.statistics.viewCount // "0" | tonumber),
@@ -251,6 +251,7 @@ jobs:
           
           echo "Output data preview:"
           echo "$videos_json" | jq '.[0]'
+
 
       - name: Send Completion Logs to Port
         if: success()
@@ -373,6 +374,7 @@ jobs:
             
             sleep 0.5
           done < <(jq -c '.[]' videos_data.json)
+
 
       - name: Send Completion Logs to Port
         if: success()
