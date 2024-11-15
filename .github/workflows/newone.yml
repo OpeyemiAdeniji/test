@@ -29,57 +29,24 @@ jobs:
           set -e
           PORT_CLIENT_ID=$(echo "$PORT_CLIENT_ID" | xargs)
           PORT_CLIENT_SECRET=$(echo "$PORT_CLIENT_SECRET" | xargs)
-  
-          # Function to get Port access token
-          get_port_access_token() {
-            response=$(curl -s -X POST "https://api.getport.io/v1/auth/access_token" \
-              -H "Content-Type: application/json" \
-              -d '{
-                "clientId": "'"$PORT_CLIENT_ID"'",
-                "clientSecret": "'"$PORT_CLIENT_SECRET"'"
-              }')
-  
-            if echo "$response" | grep -q '"ok":false'; then
-              echo "Error obtaining access token: $(echo "$response" | jq -r '.error')"
-              return 1
-            fi
-  
-            access_token=$(echo "$response" | jq -r '.accessToken // empty')
-            if [ -z "$access_token" ]; then
-              echo "Failed to retrieve access token. Response: $response"
-              return 1
-            fi
-  
-            echo "$access_token"
-          }
-  
-          ACCESS_TOKEN=$(get_port_access_token)
-          if [ -z "$ACCESS_TOKEN" ]; then
-            echo "Failed to obtain access token. Exiting."
-            exit 1
-          fi
-  
-  
-      - name: Send Logs to Port
-        env:
-          PORT_CLIENT_ID: ${{ secrets.PORT_CLIENT_ID }}
-          PORT_CLIENT_SECRET: ${{ secrets.PORT_CLIENT_SECRET }}
-        run: |
-          ACCESS_TOKEN=$(curl -s -X POST "https://api.getport.io/v1/auth/access_token" \
+          
+          response=$(curl -s -X POST "https://api.getport.io/v1/auth/access_token" \
             -H "Content-Type: application/json" \
-            -d '{
-              "clientId": "$PORT_CLIENT_ID",
-              "clientSecret": "$PORT_CLIENT_SECRET"
-            }' | jq -r '.accessToken')
-      
+            -d "{\"clientId\": \"$PORT_CLIENT_ID\", \"clientSecret\": \"$PORT_CLIENT_SECRET\"}")
+          ACCESS_TOKEN=$(echo "$response" | jq -r '.accessToken')
+          echo "ACCESS_TOKEN=$ACCESS_TOKEN" >> $GITHUB_ENV
+  
+  
+      - name: Setup Environment 
+        run: |
+          PORT_RUN_ID=$(echo '${{ inputs.port_context }}' | jq -r '.runId')
           curl -L "https://api.getport.io/v1/actions/runs/$PORT_RUN_ID/logs" \
             -H "Content-Type: application/json" \
             -H "Authorization: Bearer $ACCESS_TOKEN" \
             -d '{
-              "message": "Setting up environment",
-              "terminationStatus": "SUCCESS",
-              "statusLabel": "Setup Complete"
-            }'
+              "message": "Setting up Environment",
+              "statusLabel": "Setting up Enviroment"
+            }'
 
   fetch_playlist_metadata:
     runs-on: ubuntu-latest
