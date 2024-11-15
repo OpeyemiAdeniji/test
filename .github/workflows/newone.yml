@@ -35,8 +35,7 @@ jobs:
             -d "{\"clientId\": \"$PORT_CLIENT_ID\", \"clientSecret\": \"$PORT_CLIENT_SECRET\"}")
           ACCESS_TOKEN=$(echo "$response" | jq -r '.accessToken')
           echo "ACCESS_TOKEN=$ACCESS_TOKEN" >> $GITHUB_ENV
-  
-  
+
       - name: Setup Environment 
         run: |
           PORT_RUN_ID=$(echo '${{ inputs.port_context }}' | jq -r '.runId')
@@ -46,7 +45,7 @@ jobs:
             -d '{
               "message": "Setting up Environment",
               "statusLabel": "Setting up Enviroment"
-            }'
+            }'
 
   fetch_playlist_metadata:
     runs-on: ubuntu-latest
