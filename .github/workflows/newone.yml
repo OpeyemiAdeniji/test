@@ -154,6 +154,7 @@ jobs:
     outputs:
       videos_data: ${{ steps.collect_videos.outputs.videos_json }}
     steps:
+    
       - name: Generate and Validate Access Token
         id: token
         run: |
@@ -167,6 +168,7 @@ jobs:
               -d "{\"clientId\": \"$PORT_CLIENT_ID\", \"clientSecret\": \"$PORT_CLIENT_SECRET\"}")
             ACCESS_TOKEN=$(echo "$response" | jq -r '.accessToken')
             echo "ACCESS_TOKEN=$ACCESS_TOKEN" >> $GITHUB_ENV
+            
       - name: Send Start Logs to Port
         run: |
           PORT_RUN_ID=$(echo '${{ inputs.port_context }}' | jq -r '.runId')
@@ -177,29 +179,37 @@ jobs:
               "message": "Starting video fetch from YouTube",
               "statusLabel": "Fetching Videos"
             }'
+            
       - name: Collect Video Data
         id: collect_videos
         run: |
-          # Initialize videos array
-          videos_array="[]"
+          # Create a temporary file to store video data
+          echo '[]' > videos.json
+          
+          # Initialize pagination
           next_page_token=""
           
           while true; do
+            # Build the URL with pagination token if it exists
+            page_token_param=""
+            if [ ! -z "$next_page_token" ]; then
+              page_token_param="&pageToken=$next_page_token"
+            fi
+            
             # Fetch playlist items
-            playlist_items_url="https://www.googleapis.com/youtube/v3/playlistItems?part=snippet&maxResults=50&playlistId=${PLAYLIST_ID}&key=${YOUTUBE_API_KEY}${next_page_token:+&pageToken=$next_page_token}"
-            playlist_response=$(curl -s "$playlist_items_url")
+            echo "Fetching playlist page..."
+            playlist_items=$(curl -s "https://www.googleapis.com/youtube/v3/playlistItems?part=snippet&maxResults=50&playlistId=${PLAYLIST_ID}&key=${YOUTUBE_API_KEY}${page_token_param}")
             
-            # Extract video IDs and process them
-            video_ids=$(echo "$playlist_response" | jq -r '.items[].snippet.resourceId.videoId')
+            # Extract video IDs into a comma-separated list
+            video_ids=$(echo "$playlist_items" | jq -r '.items[].snippet.resourceId.videoId' | paste -sd ",")
             
-            for video_id in $video_ids; do
-              [ -z "$video_id" ] && continue
+            if [ ! -z "$video_ids" ]; then
+              # Fetch detailed video information
+              echo "Fetching video details..."
+              video_details=$(curl -s "https://www.googleapis.com/youtube/v3/videos?part=snippet,contentDetails,statistics&id=$video_ids&key=${YOUTUBE_API_KEY}")
               
-              # Fetch video details
-              video_details=$(curl -s "https://www.googleapis.com/youtube/v3/videos?part=snippet,contentDetails,statistics&id=$video_id&key=${YOUTUBE_API_KEY}")
-              
-              # Create video entity
-              video_json=$(echo $video_details | jq -c '.items[0] | {
+              # Process each video and append to our JSON file
+              echo "$video_details" | jq -c '.items[] | {
                 identifier: .id,
                 title: .snippet.title,
                 properties: {
@@ -210,25 +220,33 @@ jobs:
                   duration: .contentDetails.duration,
                   viewCount: (.statistics.viewCount // "0" | tonumber),
                   likeCount: (.statistics.likeCount // "0" | tonumber),
-                  commentCount: (.statistics.commentCount // "0" | tonumber)
+                  commentCount: (.statistics.commentCount // "0" | tonumber),
+                  publishedAt: .snippet.publishedAt
                 },
                 relations: {
-                  belongs_to_playlist: "'"${{ needs.fetch_playlist_metadata.outputs.playlist_id }}"'"
+                  belongs_to_playlist: "'"$PLAYLIST_ID"'"
                 }
-              }')
-              
-              # Append to videos array
-              videos_array=$(echo $videos_array | jq --argjson video "$video_json" '. + [$video]')
-            done
+              }' | while read -r video; do
+                # Append each video to the array in videos.json
+                tmp=$(mktemp)
+                jq --argjson video "$video" '. + [$video]' videos.json > "$tmp" && mv "$tmp" videos.json
+              done
+            fi
             
             # Check for next page
-              next_page_token=$(echo $playlist_response | jq -r '.nextPageToken // empty')
-              [ -z "$next_page_token" ] && break
-            done
+            next_page_token=$(echo "$playlist_items" | jq -r '.nextPageToken // empty')
+            [ -z "$next_page_token" ] && break
+            
+            echo "Moving to next page..."
+          done
           
-            # Write the JSON array to a file that will be available in the next step
-            echo "$videos_array" > videos_list.json
-            echo "videos_json=$(cat videos_list.json | jq -r '@json')" >> $GITHUB_OUTPUT
+          # Escape the JSON content for GitHub Actions output
+          videos_json=$(jq -c '.' videos.json)
+          echo "videos_json=${videos_json}" >> $GITHUB_OUTPUT
+          
+          # Debug information
+          echo "Total videos collected: $(jq 'length' videos.json)"
+          
       - name: Send Completion Logs to Port
         if: success()
         run: |
@@ -240,6 +258,8 @@ jobs:
               "message": "Successfully fetched all videos",
               "statusLabel": "Videos Fetched"
             }'
+
+            
   push_videos_to_port:
     needs: [fetch_videos, fetch_playlist_metadata]
     runs-on: ubuntu-latest
@@ -247,6 +267,7 @@ jobs:
       PORT_CLIENT_ID: ${{ secrets.PORT_CLIENT_ID }}
       PORT_CLIENT_SECRET: ${{ secrets.PORT_CLIENT_SECRET }}
     steps:
+    
       - name: Generate and Validate Access Token
         id: token
         run: |
@@ -260,6 +281,7 @@ jobs:
               -d "{\"clientId\": \"$PORT_CLIENT_ID\", \"clientSecret\": \"$PORT_CLIENT_SECRET\"}")
             ACCESS_TOKEN=$(echo "$response" | jq -r '.accessToken')
             echo "ACCESS_TOKEN=$ACCESS_TOKEN" >> $GITHUB_ENV
+            
       - name: Send Start Logs to Port
         run: |
           PORT_RUN_ID=$(echo '${{ inputs.port_context }}' | jq -r '.runId')
@@ -270,22 +292,29 @@ jobs:
               "message": "Starting video push to Port",
               "statusLabel": "Pushing Videos"
             }'
+            
       - name: Push Videos to Port
         run: |
-          # Ensure the JSON is properly decoded before processing
-            echo '${{ needs.fetch_videos.outputs.videos_json }}' | jq -r '.' > videos_list.json
+          # Create a temporary file with the JSON array
+          echo '${{ needs.fetch_videos.outputs.videos_data }}' > videos_to_process.json
           
           # Debug output
-            echo "Content of videos_list.json:"
-            cat videos_list.json
+          echo "Number of videos to process: $(jq 'length' videos_to_process.json)"
           
-          # Process each video using jq
-            jq -c '.[]' videos_list.json | while IFS= read -r video; do
-            # Debug output
-            echo "Processing video data length: ${#video}"
+          # Process each video
+          jq -c '.[]' videos_to_process.json | while read -r video; do
+            echo "Processing video..."
             
-            # Send the video data to Port
-            response=$(curl -s -w "\n%{http_code}" -X POST "https://api.getport.io/v1/blueprints/video/entities?upsert=true" \
+            # Validate video JSON structure
+            if ! echo "$video" | jq -e '.identifier' > /dev/null; then
+              echo "Error: Invalid video data structure"
+              echo "$video" | jq '.'
+              continue
+            fi
+            
+            # Send to Port with proper error handling
+            response=$(curl -s -w "\n%{http_code}" \
+              -X POST "https://api.getport.io/v1/blueprints/video/entities?upsert=true" \
               -H "Authorization: Bearer $ACCESS_TOKEN" \
               -H "Content-Type: application/json" \
               -d "$video")
@@ -294,19 +323,20 @@ jobs:
             response_body=$(echo "$response" | head -n -1)
             
             if [[ "$status_code" != "200" && "$status_code" != "201" ]]; then
-              echo "Failed to push video to Port. Status code: $status_code"
+              echo "Failed to push video. Status: $status_code"
               echo "Response: $response_body"
+              echo "Video data: $video"
               exit 1
             fi
             
-            echo "Successfully pushed video to Port"
+            video_id=$(echo "$video" | jq -r '.identifier')
+            echo "Successfully pushed video: $video_id"
             
-            # Add small delay to prevent rate limiting
-            sleep 1
+            # Rate limiting prevention
+            sleep 0.5
           done
           
-          # Clean up
-          rm videos_list.json
+          
       - name: Send Completion Logs to Port
         if: success()
         run: |
@@ -318,3 +348,5 @@ jobs:
               "message": "Successfully pushed all videos to Port",
               "statusLabel": "Videos Pushed"
             }'
+
+
