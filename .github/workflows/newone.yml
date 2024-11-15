@@ -300,35 +300,49 @@ jobs:
 
       - name: Push Videos to Port
         run: |
-          # Create a temporary file for the videos data
-          echo '${{ needs.fetch_videos.outputs.videos_data }}' > videos_data.json
+          # Create videos data file and properly escape the JSON
+          echo '${{ needs.fetch_videos.outputs.videos_data }}' | jq '.' > videos_data.json
           
-          # Validate the input JSON
+          # Check if the file exists and is valid JSON
+          if [ ! -f videos_data.json ]; then
+            echo "Error: videos_data.json file was not created"
+            exit 1
+          fi
+          
+          if ! jq empty videos_data.json 2>/dev/null; then
+            echo "Error: Invalid JSON data received from previous job"
+            echo "Raw data: ${{ needs.fetch_videos.outputs.videos_data }}"
+            exit 1
+          fi
+          
+          # Validate that it's an array
           if ! jq -e 'type == "array"' videos_data.json > /dev/null; then
-            echo "Error: Input is not a valid JSON array"
+            echo "Error: JSON data is not an array"
+            echo "Content type: $(jq 'type' videos_data.json)"
             exit 1
           fi
           
           # Process each video with proper error handling
-          jq -c '.[]' videos_data.json | while read -r video; do
+          while read -r video; do
+            if [ -z "$video" ]; then
+              continue
+            fi
+            
             echo "Processing video..."
             
             # Validate video JSON structure
             if ! echo "$video" | jq -e 'has("identifier") and has("title") and has("properties") and has("relations")' > /dev/null; then
               echo "Warning: Invalid video data structure, skipping"
-              echo "$video" | jq '.'
+              echo "Video data: $video"
               continue
             fi
-            
-            # Ensure proper JSON escaping for curl
-            video_escaped=$(echo "$video" | jq -c '.')
             
             # Send to Port with proper error handling
             response=$(curl -s -w "\n%{http_code}" \
               -X POST "https://api.getport.io/v1/blueprints/video/entities?upsert=true" \
               -H "Authorization: Bearer $ACCESS_TOKEN" \
               -H "Content-Type: application/json" \
-              -d "$video_escaped")
+              -d "$video")
             
             status_code=$(echo "$response" | tail -n1)
             response_body=$(echo "$response" | head -n -1)
@@ -336,8 +350,7 @@ jobs:
             if [[ "$status_code" != "200" && "$status_code" != "201" ]]; then
               echo "Failed to push video. Status: $status_code"
               echo "Response: $response_body"
-              echo "Video data:"
-              echo "$video" | jq '.'
+              echo "Video data: $video"
               
               # Log failure to Port
               PORT_RUN_ID=$(echo '${{ inputs.port_context }}' | jq -r '.runId')
@@ -350,7 +363,7 @@ jobs:
                   \"statusLabel\": \"Error\"
                 }"
               
-              continue  # Skip to next video instead of failing the whole job
+              continue
             fi
             
             video_id=$(echo "$video" | jq -r '.identifier')
@@ -368,7 +381,7 @@ jobs:
             
             # Rate limiting prevention
             sleep 0.5
-          done
+          done < <(jq -c '.[]' videos_data.json)
 
       - name: Send Completion Logs to Port
         if: success()
