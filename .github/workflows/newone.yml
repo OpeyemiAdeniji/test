@@ -289,11 +289,11 @@ jobs:
         run: |
           # Create a temporary file for the JSON
           echo "spot 1"
-          echo '${{ needs.fetch_videos.outputs.videos_data }}' > videos.json
+          echo '${{ needs.fetch_videos.outputs.videos_data }}' > videos_json.json
 
           echo "about to enter while loop"
           # Process each video using jq
-          cat videos.json | jq -c '.[]' | while IFS= read -r video; do
+          cat videos_json.json | jq -c '.[]' | while IFS= read -r video; do
             # Debug output
             echo "Processing video data length: ${#video}"
             
@@ -320,7 +320,7 @@ jobs:
           echo "done with while loop"
           
           # Clean up
-          rm videos.json
+          rm videos_json.json
 
       - name: Send Completion Logs to Port
         if: success()
