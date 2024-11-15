@@ -264,9 +264,6 @@ jobs:
               "statusLabel": "Videos Fetched"
             }'
 
-  # Previous content remains the same until push_videos_to_port job
-# Adding the complete push_videos_to_port job steps:
-
   push_videos_to_port:
     needs: fetch_videos
     runs-on: ubuntu-latest
@@ -289,18 +286,15 @@ jobs:
 
       - name: Push Videos to Port
         run: |
-          pwd
-          ls -la
-          
           echo "Raw videos data:"
-          echo '${{ needs.fetch_videos.outputs.videos_data }}'
+          echo "${{ needs.fetch_videos.outputs.videos_data }}"
           
-          if [ -z '${{ needs.fetch_videos.outputs.videos_data }}' ]; then
+          if [ -z "${{ needs.fetch_videos.outputs.videos_data }}" ]; then
             echo "Error: No video data received from previous job"
             exit 1
           fi
           
-          parsed_data=$(echo '${{ needs.fetch_videos.outputs.videos_data }}' | jq -r '.' 2>/dev/null)
+          parsed_data=$(echo "${{ needs.fetch_videos.outputs.videos_data }}" | jq -r '.' 2>/dev/null)
           if [ $? -ne 0 ]; then
             echo "Error: Failed to parse JSON data"
             exit 1
