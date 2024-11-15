@@ -175,7 +175,7 @@ jobs:
             -H "Authorization: Bearer $ACCESS_TOKEN" \
             -d '{
               "message": "Extraction and Migration of video data from YouTube has commenced PLAYLIST_ID - '$PLAYLIST_ID'",
-              "statusLabel": "Fetching Videos"
+              "statusLabel": "Fetching and Migrating Videos"
             }'
 
       - name: Collect Video Data and Migrate
@@ -273,7 +273,7 @@ jobs:
             -H "Authorization: Bearer $ACCESS_TOKEN" \
             -d '{
               "message": "Successfully fetched and migrated all videos PLAYLIST_ID - '$PLAYLIST_ID'",
-              "statusLabel": "Videos Fetched"
+              "statusLabel": "Videos Fetched and Migrated"
             }'
 
       - name: Handle Job Completion
