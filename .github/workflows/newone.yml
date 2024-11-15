@@ -288,7 +288,7 @@ jobs:
       - name: Push Videos to Port
         run: |
           # Parse the videos array
-          videos_data=$(echo '${{ needs.fetch_videos.outputs.videos_array }}' | jq -r .)
+          videos_data=$(echo "${{ needs.fetch_videos.outputs.videos_array }}" | jq -r .)
           
           # Process each video
           echo "$videos_data" | jq -c '.[]' | while read -r video; do
