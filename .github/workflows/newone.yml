@@ -163,17 +163,19 @@ jobs:
     outputs:
       videos_data: ${{ steps.collect_videos.outputs.videos_json }}
     steps:
-      - name: Generate Access Token
+      - name: Generate and Validate Access Token
         id: token
         run: |
-          ACCESS_TOKEN=$(curl -s -X POST "https://api.getport.io/v1/auth/access_token" \
-            -H "Content-Type: application/json" \
-            -d '{
-              "clientId": "'"$PORT_CLIENT_ID"'",
-              "clientSecret": "'"$PORT_CLIENT_SECRET"'"
-            }' | jq -r '.accessToken')
+          set -e
+          PORT_CLIENT_ID=$(echo "$PORT_CLIENT_ID" | xargs)
+          PORT_CLIENT_SECRET=$(echo "$PORT_CLIENT_SECRET" | xargs)
           
-          echo "ACCESS_TOKEN=$ACCESS_TOKEN" >> $GITHUB_ENV
+          # Function to get Port access token
+            response=$(curl -s -X POST "https://api.getport.io/v1/auth/access_token" \
+              -H "Content-Type: application/json" \
+              -d "{\"clientId\": \"$PORT_CLIENT_ID\", \"clientSecret\": \"$PORT_CLIENT_SECRET\"}")
+            ACCESS_TOKEN=$(echo "$response" | jq -r '.accessToken')
+            echo "ACCESS_TOKEN=$ACCESS_TOKEN" >> $GITHUB_ENV
 
       - name: Send Start Logs to Port
         run: |
@@ -183,7 +185,6 @@ jobs:
             -H "Authorization: Bearer $ACCESS_TOKEN" \
             -d '{
               "message": "Starting video fetch from YouTube",
-              "status": "IN_PROGRESS",
               "statusLabel": "Fetching Videos"
             }'
 
@@ -249,7 +250,6 @@ jobs:
             -H "Authorization: Bearer $ACCESS_TOKEN" \
             -d '{
               "message": "Successfully fetched all videos",
-              "terminationStatus": "SUCCESS",
               "statusLabel": "Videos Fetched"
             }'
 
@@ -260,17 +260,19 @@ jobs:
       PORT_CLIENT_ID: ${{ secrets.PORT_CLIENT_ID }}
       PORT_CLIENT_SECRET: ${{ secrets.PORT_CLIENT_SECRET }}
     steps:
-      - name: Generate Access Token
+      - name: Generate and Validate Access Token
         id: token
         run: |
-          ACCESS_TOKEN=$(curl -s -X POST "https://api.getport.io/v1/auth/access_token" \
-            -H "Content-Type: application/json" \
-            -d '{
-              "clientId": "'"$PORT_CLIENT_ID"'",
-              "clientSecret": "'"$PORT_CLIENT_SECRET"'"
-            }' | jq -r '.accessToken')
+          set -e
+          PORT_CLIENT_ID=$(echo "$PORT_CLIENT_ID" | xargs)
+          PORT_CLIENT_SECRET=$(echo "$PORT_CLIENT_SECRET" | xargs)
           
-          echo "ACCESS_TOKEN=$ACCESS_TOKEN" >> $GITHUB_ENV
+          # Function to get Port access token
+            response=$(curl -s -X POST "https://api.getport.io/v1/auth/access_token" \
+              -H "Content-Type: application/json" \
+              -d "{\"clientId\": \"$PORT_CLIENT_ID\", \"clientSecret\": \"$PORT_CLIENT_SECRET\"}")
+            ACCESS_TOKEN=$(echo "$response" | jq -r '.accessToken')
+            echo "ACCESS_TOKEN=$ACCESS_TOKEN" >> $GITHUB_ENV
 
       - name: Send Start Logs to Port
         run: |
@@ -280,7 +282,6 @@ jobs:
             -H "Authorization: Bearer $ACCESS_TOKEN" \
             -d '{
               "message": "Starting video push to Port",
-              "status": "IN_PROGRESS",
               "statusLabel": "Pushing Videos"
             }'
 
@@ -318,6 +319,5 @@ jobs:
             -H "Authorization: Bearer $ACCESS_TOKEN" \
             -d '{
               "message": "Successfully pushed all videos to Port",
-              "terminationStatus": "SUCCESS",
               "statusLabel": "Videos Pushed"
             }'
