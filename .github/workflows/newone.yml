@@ -287,16 +287,11 @@ jobs:
 
       - name: Push Videos to Port
         run: |
-          # First, decode the JSON string from the output
+          # Store the JSON array
           videos_json='${{ needs.fetch_videos.outputs.videos_data }}'
           
-          # Convert the escaped JSON string back to an array
-          echo "$videos_json" | jq -r . | while read -r video; do
-            # Skip empty lines
-            if [ -z "$video" ]; then
-              continue
-            fi
-            
+          # Process each video in the array using jq
+          echo "$videos_json" | jq -c '.[]' | while read -r video; do
             echo "Processing video: $(echo "$video" | jq -r '.title')"
             
             # Send the video data to Port
@@ -311,7 +306,6 @@ jobs:
             if [[ "$status_code" != "200" && "$status_code" != "201" ]]; then
               echo "Failed to push video to Port. Status code: $status_code"
               echo "Response: $response_body"
-              echo "Video data: $video"
               exit 1
             fi
             
