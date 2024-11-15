@@ -44,7 +44,7 @@ jobs:
             -H "Content-Type: application/json" \
             -H "Authorization: Bearer $ACCESS_TOKEN" \
             -d '{
-              "message": "Starting playlist - '$PLAYLIST_ID' metadata fetch",
+              "message": "Metadata fetch of playlist has commenced PLAYLIST_ID -$PLAYLIST_ID",
               "statusLabel": "Fetching Playlist"
             }'
 
@@ -81,7 +81,7 @@ jobs:
             -H "Content-Type: application/json" \
             -H "Authorization: Bearer $ACCESS_TOKEN" \
             -d '{
-              "message": "Successfully fetched playlist metadata",
+              "message": "Successfully fetched playlist metadata PLAYLIST_ID - $PLAYLIST_ID",
               "statusLabel": "Playlist Fetched"
             }'
 
@@ -112,7 +112,7 @@ jobs:
             -H "Content-Type: application/json" \
             -H "Authorization: Bearer $ACCESS_TOKEN" \
             -d '{
-              "message": "Starting playlist push to Port",
+              "message": "Migrating playlist data to Port has commenced PLAYLIST_ID - $PLAYLIST_ID",
               "statusLabel": "Sending Playlist to Port"
             }'
 
@@ -138,7 +138,7 @@ jobs:
             -H "Content-Type: application/json" \
             -H "Authorization: Bearer $ACCESS_TOKEN" \
             -d '{
-              "message": "Successfully pushed playlist to Port",
+              "message": "Successfully migrated playlist data to Port PLAYLIST_ID - $PLAYLIST_ID",
               "statusLabel": "Playlist Pushed"
             }'
 
@@ -173,7 +173,7 @@ jobs:
             -H "Content-Type: application/json" \
             -H "Authorization: Bearer $ACCESS_TOKEN" \
             -d '{
-              "message": "Starting video fetch from YouTube",
+              "message": "Extraction of video data from YouTube has commenced",
               "statusLabel": "Fetching Videos"
             }'
 
@@ -308,7 +308,7 @@ jobs:
             -H "Content-Type: application/json" \
             -H "Authorization: Bearer $ACCESS_TOKEN" \
             -d '{
-              "message": "Completed pushing videos to Port",
+              "message": "Video data has been migrated to Port",
               "statusLabel": "Complete"
             }'
 
@@ -318,7 +318,7 @@ jobs:
           PORT_RUN_ID=$(echo '${{ inputs.port_context }}' | jq -r '.runId')
           if [[ "$?" == "0" ]]; then
             STATUS_LABEL="Success"
-            MESSAGE="Successfully completed video processing"
+            MESSAGE="Successfully ingested Youtube data to Port!"
           else
             STATUS_LABEL="Failed"
             MESSAGE="Failed to complete video processing"
