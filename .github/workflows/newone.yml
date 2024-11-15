@@ -287,28 +287,34 @@ jobs:
 
       - name: Push Videos to Port
         run: |
-          # Parse the videos array
-          videos_data='${{ needs.fetch_videos.outputs.videos_data }}'
-          
-          echo "$videos_data" | jq -c '.[]' | while read -r video; do
-            # Push to Port
-            response=$(curl -s -w "%{http_code}" -X POST "https://api.getport.io/v1/blueprints/video/entities?upsert=true" \
-              -H "Authorization: Bearer $ACCESS_TOKEN" \
-              -H "Content-Type: application/json" \
-              -d "$video")
-            
-            status_code=${response: -3}
-            response_body=${response%???}
-            
-            if [[ "$status_code" != "200" && "$status_code" != "201" ]]; then
-              echo "Failed to push video to Port. Status code: $status_code"
-              echo "Response body: $response_body"
-              exit 1
+          # Create a temporary file to store the videos data
+          echo '${{ needs.fetch_videos.outputs.videos_data }}' > videos.json
+
+          # Read and process the JSON file
+          while IFS= read -r video; do
+            if [ -n "$video" ]; then
+              # Push to Port
+              response=$(curl -s -w "%{http_code}" -X POST "https://api.getport.io/v1/blueprints/video/entities?upsert=true" \
+                -H "Authorization: Bearer $ACCESS_TOKEN" \
+                -H "Content-Type: application/json" \
+                -d "$video")
+              
+              status_code=${response: -3}
+              response_body=${response%???}
+              
+              if [[ "$status_code" != "200" && "$status_code" != "201" ]]; then
+                echo "Failed to push video to Port. Status code: $status_code"
+                echo "Response body: $response_body"
+                exit 1
+              fi
+              
+              # Add small delay to prevent rate limiting
+              sleep 1
             fi
-            
-            # Add small delay to prevent rate limiting
-            sleep 1
-          done
+          done < <(jq -c '.[]' videos.json)
+
+          # Clean up
+          rm videos.json
 
       - name: Send Completion Logs to Port
         if: success()
