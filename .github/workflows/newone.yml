@@ -32,10 +32,12 @@ jobs:
           # Function to get Port access token
             response=$(curl -s -X POST "https://api.getport.io/v1/auth/access_token" \
               -H "Content-Type: application/json" \
-              -d "{\"clientId\": \"$PORT_CLIENT_ID\", \"clientSecret\": \"$PORT_CLIENT_SECRET\"}")
+              -d '{
+                    "clientId": "$PORT_CLIENT_ID",
+                    "clientSecret": "PORT_CLIENT_SECRET"
+                  }'
             ACCESS_TOKEN=$(echo "$response" | jq -r '.accessToken')
             echo "ACCESS_TOKEN=$ACCESS_TOKEN" >> $GITHUB_ENV
-            echo "$ACCESS_TOKEN"
 
       - name: Send Start Logs to Port
         id: start_log
