@@ -233,13 +233,13 @@ jobs:
             done
             
             # Check for next page
-            next_page_token=$(echo $playlist_response | jq -r '.nextPageToken // empty')
-            [ -z "$next_page_token" ] && break
-          done
+              next_page_token=$(echo $playlist_response | jq -r '.nextPageToken // empty')
+              [ -z "$next_page_token" ] && break
+            done
           
-          # Escape the JSON array for GitHub Actions output
-          escaped_array=$(echo "$videos_array" | jq -r '@json')
-          echo "videos_json=$escaped_array" >> $GITHUB_OUTPUT
+            # Write the JSON array to a file that will be available in the next step
+            echo "$videos_array" > videos_list.json
+            echo "videos_json=$(cat videos_list.json | jq -r '@json')" >> $GITHUB_OUTPUT
 
       - name: Send Completion Logs to Port
         if: success()
@@ -287,13 +287,15 @@ jobs:
 
       - name: Push Videos to Port
         run: |
-          # Create a temporary file for the JSON
-          echo "spot 1"
-          echo '${{ needs.fetch_videos.outputs.videos_data }}' > videos_json.json
-
-          echo "about to enter while loop"
+          # Ensure the JSON is properly decoded before processing
+            echo '${{ needs.fetch_videos.outputs.videos_json }}' | jq -r '.' > videos_list.json
+          
+          # Debug output
+            echo "Content of videos_list.json:"
+            cat videos_list.json
+          
           # Process each video using jq
-          cat videos_json.json | jq -c '.[]' | while IFS= read -r video; do
+            jq -c '.[]' videos_list.json | while IFS= read -r video; do
             # Debug output
             echo "Processing video data length: ${#video}"
             
@@ -317,10 +319,9 @@ jobs:
             # Add small delay to prevent rate limiting
             sleep 1
           done
-          echo "done with while loop"
           
           # Clean up
-          rm videos_json.json
+          rm videos_list.json
 
       - name: Send Completion Logs to Port
         if: success()
